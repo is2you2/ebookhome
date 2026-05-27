@@ -11,10 +11,15 @@ export function changeTabStatus(status: string) {
         return status;
     });
 
-    if (status !== 'viewer') {
-        document
-            .getElementById('scroll_content')
-            ?.scrollIntoView({ behavior: 'smooth' });
+    switch (status) {
+        case 'search':
+        case 'viewer':
+            break;
+        default:
+            document
+                .getElementById('scroll_content')
+                ?.scrollIntoView({ behavior: 'smooth' });
+            break;
     }
 }
 

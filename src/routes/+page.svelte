@@ -109,6 +109,8 @@
   </nav>
 {/if}
 
+<div id="scroll_content"></div>
+
 <!-- 표시 콘텐츠 자리 -->
 
 {#if $tabStatus == "login"}

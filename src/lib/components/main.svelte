@@ -1,14 +1,16 @@
+<script>
+  import { changeTabStatus } from "$lib/services/global";
+</script>
+
 <!-- HERO -->
 <section class="hero">
   <div class="container">
-
     <div class="main-banner">
       <h1>2026 상반기 베스트셀러</h1>
       <p>지금 가장 많이 읽히는 책들을 만나보세요</p>
     </div>
 
     <div class="side-banner">
-
       <div class="mini-banner">
         <h3>오늘의 특가</h3>
         <p>최대 70% 할인</p>
@@ -18,69 +20,76 @@
         <h3>신간 추천</h3>
         <p>이번 주 새로 나온 책</p>
       </div>
-
     </div>
-
   </div>
 </section>
 
 <!-- BESTSELLER -->
 <section>
   <div class="container">
-
     <div class="section-title">베스트셀러</div>
 
     <div class="book-grid">
-
-      <div class="book-card">
+      <button
+        class="element-button book-card"
+        onclick={() => changeTabStatus("book-detail")}
+      >
         <div class="book-image"></div>
         <div class="book-title">소년이 온다</div>
         <div class="book-author">한강</div>
         <div class="book-price">15,300원</div>
-      </div>
+      </button>
 
-      <div class="book-card">
+      <button
+        class="element-button book-card"
+        onclick={() => changeTabStatus("book-detail")}
+      >
         <div class="book-image"></div>
         <div class="book-title">불편한 편의점</div>
         <div class="book-author">김호연</div>
         <div class="book-price">14,000원</div>
-      </div>
+      </button>
 
-      <div class="book-card">
+      <button
+        class="element-button book-card"
+        onclick={() => changeTabStatus("book-detail")}
+      >
         <div class="book-image"></div>
         <div class="book-title">세이노의 가르침</div>
         <div class="book-author">세이노</div>
         <div class="book-price">6,480원</div>
-      </div>
+      </button>
 
-      <div class="book-card">
+      <button
+        class="element-button book-card"
+        onclick={() => changeTabStatus("book-detail")}
+      >
         <div class="book-image"></div>
         <div class="book-title">도둑맞은 집중력</div>
         <div class="book-author">요한 하리</div>
         <div class="book-price">18,000원</div>
-      </div>
+      </button>
 
-      <div class="book-card">
+      <button
+        class="element-button book-card"
+        onclick={() => changeTabStatus("book-detail")}
+      >
         <div class="book-image"></div>
         <div class="book-title">역행자</div>
         <div class="book-author">자청</div>
         <div class="book-price">17,500원</div>
-      </div>
-
+      </button>
     </div>
-
   </div>
 </section>
 
 <!-- EVENT -->
 <section>
   <div class="container">
-
     <div class="event-banner">
       <h2>회원가입 이벤트</h2>
       <p>신규 회원 5,000원 쿠폰 증정</p>
     </div>
-
   </div>
 </section>
 
