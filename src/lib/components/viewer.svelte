@@ -118,12 +118,23 @@
     BookListModal.showModal();
   }
   let BookListModal: any;
+  let isClosing = $state(false);
+
+  async function CloseModal() {
+    isClosing = true;
+
+    await new Promise((r) => setTimeout(r, 250));
+
+    BookListModal.close();
+
+    isClosing = false;
+  }
   /** 마지막에 본 책 id를 기억해서 로딩 중복을 하지 않음 */
   let LastViewedBookId = $state("");
   /** 모달에서 책 정보를 클릭함 */
   async function ClickBookListFromModal(info: BookInfo) {
     // 모달은 닫기
-    BookListModal.close();
+    CloseModal();
     if (LastViewedBookId == info.id) return;
     CurrentBookInfo = info;
     // 이미 존재하는 책이 있다면 빼내기 애니메이션
@@ -1967,6 +1978,7 @@
   {#if isEPubLoaded}
     <button
       onclick={UserWantInputPageNumber}
+      class="element-button"
       style="
                 position: absolute;
                 right: 0;
@@ -1974,6 +1986,7 @@
                 margin: 16px;
                 font-size: 32px;
                 cursor: pointer;
+                color: white;
             "
     >
       {#if !isPageNumberClicked}
@@ -1990,6 +2003,7 @@
                             width: 100px;
                             height: 40px;
                             text-align: right;
+                            font-size: 32px;
                         "
             onblur={UserWantInputPageNumber}
             onkeydown={(e) => {
@@ -2031,7 +2045,7 @@
       {/if}
 
       {#if LookCoverStatus != "idle"}
-        <div class="button_style">기능</div>
+        <button class="button_style">기능</button>
       {/if}
 
       {#if isEPubLoaded && UserViewPage}
@@ -2055,7 +2069,7 @@
 
 <!-- dialog modal -->
 
-<dialog bind:this={BookListModal} class="book_modal">
+<dialog bind:this={BookListModal} class="book_modal" class:closing={isClosing}>
   <div class="container">
     <!-- 검색 -->
 
@@ -2078,11 +2092,9 @@
     <!-- 필터 -->
 
     <div class="filters">
-      <div class="filter active">전체</div>
-
-      <div class="filter">읽는 중</div>
-
-      <div class="filter">완독</div>
+      <button class="element-button filter active">전체</button>
+      <button class="element-button filter">읽는 중</button>
+      <button class="element-button filter">완독</button>
     </div>
 
     <!-- 리스트 -->
@@ -2147,12 +2159,40 @@
     max-height: 80vh;
 
     overflow: hidden;
+
+    opacity: 1;
+    transform: translateY(0);
+
+    transition:
+      opacity 0.25s ease,
+      transform 0.25s ease;
   }
 
   .book_modal::backdrop {
     background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(2px);
   }
+
+  /* 닫힐 때 */
+  .book_modal.closing {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+  .book_modal[open] {
+    animation: modalShow 0.25s ease;
+  }
+
+  @keyframes modalShow {
+    from {
+      opacity: 0;
+      transform: translateY(40px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
   /* 여기부터는 페이지 관련 */
   .center_contents {
     display: flex;
