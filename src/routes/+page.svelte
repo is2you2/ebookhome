@@ -9,6 +9,17 @@
   import { tabStatus, changeTabStatus } from "$lib/services/global";
   import { cubicOut } from "svelte/easing";
 
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
+
+  document.documentElement.dataset.theme = window.matchMedia(
+    "(prefers-color-scheme: dark)",
+  ).matches
+    ? "dark"
+    : "light";
+  media.addEventListener("change", (e) => {
+    document.documentElement.dataset.theme = e.matches ? "dark" : "light";
+  });
+
   function collapseFade(node: HTMLElement) {
     const height = node.offsetHeight;
     return {
@@ -64,6 +75,9 @@
   <nav transition:collapseFade>
     <div class="container">
       <ul class="nav-menu">
+        <li>
+          <button class="element-button text-button"> 소개 </button>
+        </li>
         <li>
           <button
             class="element-button text-button"

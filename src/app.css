@@ -5,6 +5,8 @@ body {
 
 body {
   margin: 0px;
+  color: var(--text);
+  background-color: var(--bg);
 }
 
 :root {
