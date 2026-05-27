@@ -121,13 +121,21 @@
   let BookListModal: any;
   let isClosing = $state(false);
 
+  /** esc 등으로 꺼지는 순간 포착 */
   function handleBackdrop(e: any) {
     e.preventDefault();
     CloseModal();
   }
 
+  /** backdrop 클릭 검토하기 */
+  function handleClick(e: MouseEvent) {
+    // dialog 바깥(backdrop) 클릭만 걸러내기
+    if (e.target === BookListModal) {
+      CloseModal();
+    }
+  }
+
   async function CloseModal() {
-    console.log("넘어는 오니");
     isClosing = true;
 
     await new Promise((r) => setTimeout(r, 250));
@@ -2113,6 +2121,7 @@
 <dialog
   bind:this={BookListModal}
   oncancel={(e) => handleBackdrop(e)}
+  onclick={(e) => handleClick(e)}
   class="book_modal"
   class:closing={isClosing}
 >
