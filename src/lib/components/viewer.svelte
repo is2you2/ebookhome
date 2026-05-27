@@ -2291,7 +2291,6 @@
   }
 
   .search-bar button {
-    flex: 1;
     margin-left: 12px;
     padding: 10px;
     border: 1px solid var(--book-list-filter-border);
@@ -2352,6 +2351,7 @@
 
   .info {
     flex: 1;
+    text-align: initial;
   }
 
   .title {
