@@ -57,7 +57,7 @@ export class P5Loading {
                     p.setup = () => {
                         p.noCanvas();
                         this.parentDiv = p.createDiv();
-                        this.parentDiv.style("position: absolute; left: 0; top: 0; z-index: 1");
+                        this.parentDiv.style("position: absolute; left: 0px; top: 0px; z-index: 1");
                         this.parentDiv.style("width: 100%; height: fit-content");
                         this.parentDiv.style("padding: 16px;");
                         this.parentDiv.style("display: flex; flex-direction: column");
@@ -65,6 +65,7 @@ export class P5Loading {
                         this.parentDiv.style("justify-content: center;");
                         this.parentDiv.style("pointer-events: none");
                         this.parentDiv.style("user-select: none");
+                        this.parentDiv.style('box-sizing: border-box');
 
                         this.AddLoadingInfo = (info: LoadingForm) => {
                             this.loadingStack[info.id] = info;
@@ -79,6 +80,7 @@ export class P5Loading {
                             thisLoading.style("border-radius: 32px");
                             thisLoading.style("padding: 8px");
                             thisLoading.style("color: white");
+                            thisLoading.style('box-sizing: border-box');
                             thisLoading.parent(this.parentDiv);
                             // 알림을 클릭할 수 있는지 여부 변경
                             if (info.clickable) {
