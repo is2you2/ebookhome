@@ -7,11 +7,26 @@
   import BookDetail from "$lib/components/book-detail.svelte";
 
   import { tabStatus, changeTabStatus } from "$lib/services/global";
+  import { cubicOut } from "svelte/easing";
+
+  function collapseFade(node: HTMLElement) {
+    const height = node.offsetHeight;
+    return {
+      duration: 1000,
+      easing: cubicOut,
+
+      css: (t: number) => `
+        overflow: hidden;
+        height: ${t * height}px;
+        opacity: ${t};
+      `,
+    };
+  }
 </script>
 
 {#if $tabStatus != "viewer"}
   <!-- TOP BAR -->
-  <div class="top-bar">
+  <div transition:collapseFade class="top-bar">
     <div class="container">
       <button
         class="element-button text-button"
@@ -26,7 +41,7 @@
   </div>
 
   <!-- HEADER -->
-  <header>
+  <header transition:collapseFade>
     <div class="container">
       <button
         class="element-button text-button logo"
@@ -46,7 +61,7 @@
   </header>
 
   <!-- NAV -->
-  <nav>
+  <nav transition:collapseFade>
     <div class="container">
       <ul class="nav-menu">
         <li>

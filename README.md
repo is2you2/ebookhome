@@ -1,42 +1,5 @@
-# sv
+# Ebook 뷰어가 내장된 홈페이지 구성
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+이 기회에 ionic 을 버리고 svelte 로 옮겨타려고 한다. 지금이 기회다.
 
-## Creating a project
-
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-npx sv@0.15.3 create --template minimal --types ts --install npm ebookhome-sv
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
-
-## Building
-
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+디자인을 ai 가 해주는 지금이야말로 모든 것을 버리고 가벼움으로 갈아탈 때
