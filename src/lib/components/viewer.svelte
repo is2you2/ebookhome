@@ -121,7 +121,13 @@
   let BookListModal: any;
   let isClosing = $state(false);
 
+  function handleBackdrop(e: any) {
+    e.preventDefault();
+    CloseModal();
+  }
+
   async function CloseModal() {
+    console.log("넘어는 오니");
     isClosing = true;
 
     await new Promise((r) => setTimeout(r, 250));
@@ -2104,7 +2110,12 @@
 
 <!-- dialog modal -->
 
-<dialog bind:this={BookListModal} class="book_modal" class:closing={isClosing}>
+<dialog
+  bind:this={BookListModal}
+  oncancel={(e) => handleBackdrop(e)}
+  class="book_modal"
+  class:closing={isClosing}
+>
   <div class="container">
     <!-- 검색 -->
 
