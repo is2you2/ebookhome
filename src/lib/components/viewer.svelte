@@ -2004,6 +2004,13 @@
                             height: 40px;
                             text-align: right;
                             font-size: 32px;
+                            margin: 0;
+                            padding: 0;
+                            border: none;
+                            outline: none;
+                            box-sizing: border-box;
+                            background-color: transparent;
+                            color: white;
                         "
             onblur={UserWantInputPageNumber}
             onkeydown={(e) => {
