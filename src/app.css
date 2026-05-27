@@ -1,0 +1,49 @@
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+:root {
+  /* LIGHT THEME */
+  --ion-color-primary: #4f46e5;
+  --ion-color-secondary: #22c55e;
+  --ion-color-primary-bg: #f5f5ff;
+  --ion-color-tertiary: rgb(98, 184, 233);
+
+  --bg: #ffffff;
+  --text: #111111;
+  --card: #ffffff;
+  --border: #e5e5e5;
+}
+
+/* DARK THEME */
+[data-theme="dark"] {
+  --ion-color-primary: #c56b50;
+  --ion-color-secondary: #3459d3;
+  --ion-color-primary-bg: #1e1b4b;
+  --ion-color-tertiary: rgb(226, 167, 58);
+
+  --bg: #0f172a;
+  --text: #e5e7eb;
+  --card: #1f2937;
+  --border: #374151;
+}
+
+/* global.css */
+.element-button {
+  all: unset;
+  cursor: pointer;
+}
+
+.text-button {
+  color: var(--ion-color-primary);
+  transition: 0.2s;
+}
+
+.text-button:hover {
+  color: var(--ion-color-secondary);
+}
