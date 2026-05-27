@@ -2075,10 +2075,6 @@
         >
       {/if}
 
-      {#if LookCoverStatus != "idle"}
-        <button transition:button_anim class="button_style">기능</button>
-      {/if}
-
       {#if isEPubLoaded && UserViewPage}
         <button
           transition:button_anim
