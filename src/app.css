@@ -17,11 +17,14 @@ body {
   --ion-color-primary-bg: #f5f5ff;
   --ion-color-tertiary: rgb(98, 184, 233);
 
-  --toast-background-color: #4f46e588;
-
+  
   --book-list-background: #ddd;
   --book-list-filter-bg: #bbb;
   --book-list-filter-border: #ccc;
+  
+  --toast-background-color: #4f46e588;
+  --loading-waiting-color: #ddd;
+  --loading-done-color: #4f46e5;
 
   --threejs-button: #ddd8;
   --threejs-button-border: #ddd8;
@@ -39,11 +42,14 @@ body {
   --ion-color-primary-bg: #1e1b4b;
   --ion-color-tertiary: rgb(226, 167, 58);
 
-  --toast-background-color: #c56b5088;
-
+  
   --book-list-background: #ddd;
   --book-list-filter-bg: #bbb;
   --book-list-filter-border: #ccc;
+  
+  --toast-background-color: #c56b5088;
+  --loading-waiting-color: #ddd;
+  --loading-done-color: #c56b50;
 
   --threejs-button: #ddd8;
   --threejs-button-border: #ddd8;
