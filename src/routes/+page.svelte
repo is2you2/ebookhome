@@ -9,74 +9,76 @@
   import { tabStatus, changeTabStatus } from "$lib/services/global";
 </script>
 
-<!-- TOP BAR -->
-<div class="top-bar">
-  <div class="container">
-    <button
-      class="element-button text-button"
-      onclick={() => changeTabStatus("login")}>로그인</button
-    >
-    <button
-      class="element-button text-button"
-      onclick={() => changeTabStatus("register")}>회원가입</button
-    >
-    <button class="element-button text-button">고객센터</button>
-  </div>
-</div>
-
-<!-- HEADER -->
-<header>
-  <div class="container">
-    <button
-      class="element-button text-button logo"
-      onclick={() => changeTabStatus("home")}>BOOKSTORE</button
-    >
-
-    <div class="search-box">
-      <input type="text" placeholder="책 제목 / 저자 / 출판사 검색" />
-      <button onclick={() => changeTabStatus("search")}>검색</button>
-    </div>
-
-    <div class="header-icons">
-      <span>마이페이지</span>
-      <span>장바구니</span>
+{#if $tabStatus != "viewer"}
+  <!-- TOP BAR -->
+  <div class="top-bar">
+    <div class="container">
+      <button
+        class="element-button text-button"
+        onclick={() => changeTabStatus("login")}>로그인</button
+      >
+      <button
+        class="element-button text-button"
+        onclick={() => changeTabStatus("register")}>회원가입</button
+      >
+      <button class="element-button text-button">고객센터</button>
     </div>
   </div>
-</header>
 
-<!-- NAV -->
-<nav>
-  <div class="container">
-    <ul class="nav-menu">
-      <li>
-        <button
-          class="element-button text-button"
-          onclick={() => changeTabStatus("search")}
-        >
-          베스트셀러
-        </button>
-      </li>
-      <li>
-        <button
-          class="element-button text-button"
-          onclick={() => changeTabStatus("search")}
-        >
-          신상품
-        </button>
-      </li>
-      <li>
-        <button
-          class="element-button text-button"
-          onclick={() => changeTabStatus("viewer")}
-        >
-          eBook 뷰어
-        </button>
-      </li>
-      <li><button class="element-button text-button"> POD 주문 </button></li>
-      <li><button class="element-button text-button"> 이벤트 </button></li>
-    </ul>
-  </div>
-</nav>
+  <!-- HEADER -->
+  <header>
+    <div class="container">
+      <button
+        class="element-button text-button logo"
+        onclick={() => changeTabStatus("home")}>BOOKSTORE</button
+      >
+
+      <div class="search-box">
+        <input type="text" placeholder="책 제목 / 저자 / 출판사 검색" />
+        <button onclick={() => changeTabStatus("search")}>검색</button>
+      </div>
+
+      <div class="header-icons">
+        <span>마이페이지</span>
+        <span>장바구니</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- NAV -->
+  <nav>
+    <div class="container">
+      <ul class="nav-menu">
+        <li>
+          <button
+            class="element-button text-button"
+            onclick={() => changeTabStatus("search")}
+          >
+            베스트셀러
+          </button>
+        </li>
+        <li>
+          <button
+            class="element-button text-button"
+            onclick={() => changeTabStatus("search")}
+          >
+            신상품
+          </button>
+        </li>
+        <li>
+          <button
+            class="element-button text-button"
+            onclick={() => changeTabStatus("viewer")}
+          >
+            eBook 뷰어
+          </button>
+        </li>
+        <li><button class="element-button text-button"> POD 주문 </button></li>
+        <li><button class="element-button text-button"> 이벤트 </button></li>
+      </ul>
+    </div>
+  </nav>
+{/if}
 
 <!-- 표시 콘텐츠 자리 -->
 
@@ -103,22 +105,25 @@
 {#if $tabStatus == "book-detail"}
   <BookDetail />
 {/if}
-<!-- FOOTER -->
-<footer>
-  <div class="container">
-    <div>
-      <h3>BOOKSTORE</h3>
-      <p>서울특별시 어딘가 123</p>
-      <p>사업자등록번호 123-45-67890</p>
-    </div>
 
-    <div>
-      <p>이용약관</p>
-      <p>개인정보처리방침</p>
-      <p>고객센터</p>
+{#if $tabStatus != "viewer"}
+  <!-- FOOTER -->
+  <footer>
+    <div class="container">
+      <div>
+        <h3>BOOKSTORE</h3>
+        <p>서울특별시 어딘가 123</p>
+        <p>사업자등록번호 123-45-67890</p>
+      </div>
+
+      <div>
+        <p>이용약관</p>
+        <p>개인정보처리방침</p>
+        <p>고객센터</p>
+      </div>
     </div>
-  </div>
-</footer>
+  </footer>
+{/if}
 
 <style lang="scss">
   * {
