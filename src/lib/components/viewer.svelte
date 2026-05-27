@@ -16,6 +16,7 @@
 
   import p5 from "p5";
   import JSZip from "jszip";
+  import { cubicOut } from "svelte/easing";
 
   interface PageInfo {
     root: any;
@@ -849,6 +850,25 @@
       },
     });
     LookCoverStatus = "front";
+  }
+
+  /** 하단 컨트롤 버튼 애니메이션 */
+  function button_anim(node: any) {
+    return {
+      duration: 1000,
+      easing: cubicOut,
+      css: (t: number) => {
+        return `
+          overflow: hidden;
+          opacity: ${t};
+          width: ${t * 64}px;
+          height: ${t * 64}px;
+          margin-right: ${t * 16}px;
+          border: ${t * 3}px double var(--threejs-button-border);
+          font-size: ${t * 16}px;
+        `;
+      },
+    };
   }
 
   /** 앞면 보기 */
@@ -2048,19 +2068,31 @@
       <!-- UI 버튼 -->
 
       {#if isEPubLoaded && UserViewPage === 0}
-        <button class="button_style" onclick={showFrontCover}>표지</button>
+        <button
+          transition:button_anim
+          class="button_style"
+          onclick={showFrontCover}>표지</button
+        >
       {/if}
 
       {#if LookCoverStatus != "idle"}
-        <button class="button_style">기능</button>
+        <button transition:button_anim class="button_style">기능</button>
       {/if}
 
       {#if isEPubLoaded && UserViewPage}
-        <button class="button_style" onclick={() => PrevPage()}>이전</button>
+        <button
+          transition:button_anim
+          class="button_style"
+          onclick={() => PrevPage()}>이전</button
+        >
       {/if}
 
       {#if isEPubLoaded && LookCoverStatus != "idle" && UserViewPage != PagePaths?.length - 1}
-        <button class="button_style" onclick={NextPageBtn}>다음</button>
+        <button
+          transition:button_anim
+          class="button_style"
+          onclick={NextPageBtn}>다음</button
+        >
       {/if}
 
       <button
@@ -2219,6 +2251,8 @@
     background-color: var(--threejs-button);
     margin-right: 16px;
     cursor: pointer;
+    padding: 0px;
+    font-size: 16px;
   }
 
   /* 페이지 입력칸에 위아래 숫자 스피너 제거 */
