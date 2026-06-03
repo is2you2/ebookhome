@@ -801,11 +801,6 @@
       p.setup = () => {
         p.noCanvas();
       };
-      let rafId = null;
-      p.windowResized = () => {
-        cancelAnimationFrame(rafId);
-        rafId = requestAnimationFrame(() => {});
-      };
     });
   }
 
@@ -2005,6 +2000,7 @@
         height: 100%;
         background-color: black;
         position: relative;
+        overflow: hidden;
     "
 >
   <!-- 우측상단 페이지 정보 -->
