@@ -2297,6 +2297,7 @@
 
   .search-bar input {
     flex: 1;
+    min-width: 0;
     padding: 10px;
     border: 1px solid var(--book-list-filter-border);
     border-radius: 6px;
