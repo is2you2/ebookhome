@@ -1,9 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { goHome } from "../services/global";
-  import { p5loading } from "../services/p5loading";
   import { indexed } from "../services/indexed";
-  import { lang } from "../services/language";
 
   import * as THREE from "three";
   import * as ThreeGLTFLoader from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -14,7 +11,6 @@
 
   import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
-  import p5 from "p5";
   import JSZip from "jszip";
   import { cubicOut } from "svelte/easing";
 
@@ -47,11 +43,6 @@
       });
     });
   });
-
-  /** 이전 탭으로 돌아가기 */
-  function GoBackHome() {
-    goHome();
-  }
 
   /** threejs 씬 구성됨 */
   let threeContext = null;
@@ -789,19 +780,11 @@
     camera._fovRAF = requestAnimationFrame(update);
   }
 
-  /** 페이지 html 버튼 구성 총괄용 */
-  let p5canvas: p5;
   /** 표지 보기 애니메이션 동작 여부 */
   let isCoverAnimPlaying = true;
   /** 양식에 맞춰 epub 파일 구성 준비 */
   async function LoadUIButtons() {
-    p5canvas?.remove();
-    p5canvas = null;
-    p5canvas = new p5((p: p5) => {
-      p.setup = () => {
-        p.noCanvas();
-      };
-    });
+    console.log("LoadUIButtons");
   }
 
   /** 카메라 앞으로 책 가져오기 */
@@ -1011,12 +994,8 @@
   }
 
   /** 파일을 다운받고 로컬에 기록하기 */
-  async function LoadEpubFileAsForm(p: p5, info: BookInfo, file: File) {
+  async function LoadEpubFileAsForm(info: BookInfo, file: File) {
     const actId = "loadEpub";
-    await p5loading.update({
-      id: actId,
-      message: "epub 파일 불러오기 (하드코딩)",
-    });
     // 페이지 정보 초기화
     PageSize.x = 0;
     PageSize.y = 0;
@@ -1030,64 +1009,70 @@
     /** jpg 퀄리티 */
     const quality = 0.9;
     for (let i = 0, j = PagePaths.length; i < j; i++) {
-      if (PageDestroying) {
-        p5loading.remove(actId);
-        return;
-      }
-      p5loading.update({
-        id: actId,
-        message: `epub 파일 불러오기 (하드코딩): ${p.floor((i / j) * 100)}%`,
-        progress: i / j,
-      });
       const blob = await getImageBlob(epub, PagePaths[i]);
       await indexed.saveBlobToUserPath(blob, PagePaths[i]);
       const FileURL = URL.createObjectURL(blob);
       await new Promise((done: any, err) => {
-        p.loadImage(
-          FileURL,
-          async (v) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous"; // 필요시 CORS 설정
+
+        img.onload = async () => {
+          try {
             // 원본 크기
-            const w = v.width;
-            const h = v.height;
+            const w = img.naturalWidth;
+            const h = img.naturalHeight;
+
             // 원본 크기를 기억
-            if (!PageSize.x) PageSize.x = v.width;
-            if (!PageSize.y) PageSize.y = v.height;
+            if (!PageSize.x) PageSize.x = w;
+            if (!PageSize.y) PageSize.y = h;
+
             // 긴 변 기준 스케일 계산
             const scale = Math.min(maxSize / Math.max(w, h), 1);
+
             // 최종 크기
             const newW = Math.round(w * scale);
             const newH = Math.round(h * scale);
-            // resize 적용
-            v.resize(newW, newH);
-            const blob: Blob = await new Promise((done: any) => {
-              v["canvas"].toBlob(
-                (getBlob: Blob) => {
-                  done(getBlob);
+
+            // 캔버스 생성 및 리사이즈 적용
+            const canvas = document.createElement("canvas");
+            canvas.width = newW;
+            canvas.height = newH;
+
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, newW, newH);
+
+            // Blob 변환
+            const blob: Blob = await new Promise((resolve) => {
+              canvas.toBlob(
+                (getBlob) => {
+                  resolve(getBlob);
                 },
-                "image/jpg",
+                "image/jpeg",
                 quality,
               );
             });
+
             await indexed.saveBlobToUserPath(
               blob,
               `${PagePaths[i]}_thumbnail.jpg`,
             );
+
             done();
-          },
-          (e) => {
-            console.log("파일 불러오기 실패: ", e);
+          } catch (e) {
+            console.log("이미지 처리 중 오류 발생: ", e);
             err(e);
-          },
-        );
+          }
+        };
+
+        img.onerror = (e) => {
+          console.log("파일 불러오기 실패: ", e);
+          err(e);
+        };
+
+        img.src = FileURL;
       });
       URL.revokeObjectURL(FileURL);
     }
-    p5loading.update({
-      id: actId,
-      message: `epub 파일 불러오기 (하드코딩): 100%`,
-      progress: 1,
-    });
-    p5loading.remove(actId);
     await CreatePageObject({
       videoCover: info.video_thumbnail,
     });
@@ -1867,10 +1852,6 @@
     isEPubLoaded = false;
     LastViewedBookId = info.id;
     const actId = "loadEpub";
-    p5loading.update({
-      id: actId,
-      message: "예시 파일 다운로드 중...",
-    });
     try {
       const response = await fetch(info.epub_url);
       if (!response.ok)
@@ -1887,10 +1868,6 @@
       let receivedLength = 0;
 
       while (true) {
-        if (PageDestroying) {
-          p5loading.remove(actId);
-          return;
-        }
         const { done, value } = await reader.read();
         if (done) break;
         chunks.push(value);
@@ -1898,10 +1875,6 @@
 
         if (total) {
           const percent = (receivedLength / total) * 100;
-          p5loading.update({
-            id: actId,
-            message: `예시 파일 다운로드 중...: ${Math.floor(percent)}%`,
-          });
           // 필요하면 UI 업데이트: progress bar 등
         }
       }
@@ -1912,7 +1885,7 @@
       const file = new File([blob], fileName, { type: blob.type });
 
       // 기존 EPUB 로딩 함수 호출
-      LoadEpubFileAsForm(p5canvas, info, file);
+      LoadEpubFileAsForm(info, file);
     } catch (err) {
       console.error("EPUB 다운로드 실패:", err);
     }
@@ -1963,10 +1936,7 @@
     }
   }
 
-  /** 페이지를 벗어나는 중 */
-  let PageDestroying = false;
   onDestroy(() => {
-    PageDestroying = true;
     const keys = Object.keys(threeContext);
     for (let key of keys) {
       switch (key) {
@@ -2062,211 +2032,9 @@
       </span>
     </button>
   {/if}
-
-  <!-- 하단 버튼들 구성 -->
-
-  <div
-    class="center_contents"
-    style="
-            position: absolute;
-            bottom: 0;
-            width: 100%;
-            height: 150px;
-        "
-  >
-    <div class="center_contents button_panel">
-      <!-- UI 버튼 -->
-
-      {#if isEPubLoaded && UserViewPage === 0}
-        <button
-          transition:button_anim
-          class="button_style"
-          onclick={showFrontCover}>표지</button
-        >
-      {/if}
-
-      {#if isEPubLoaded && UserViewPage}
-        <button
-          transition:button_anim
-          class="button_style"
-          onclick={() => PrevPage()}>이전</button
-        >
-      {/if}
-
-      {#if isEPubLoaded && LookCoverStatus != "idle" && UserViewPage != PagePaths?.length - 1}
-        <button
-          transition:button_anim
-          class="button_style"
-          onclick={NextPageBtn}>다음</button
-        >
-      {/if}
-
-      <button
-        class="button_style"
-        style="margin-right: 0px;"
-        onclick={OpenBookList}
-      >
-        목록
-      </button>
-    </div>
-  </div>
 </div>
 
-<!-- dialog modal -->
-
-<dialog
-  bind:this={BookListModal}
-  oncancel={(e) => handleBackdrop(e)}
-  onclick={(e) => handleClick(e)}
-  class="book_modal"
-  class:closing={isClosing}
->
-  <div class="container">
-    <!-- 검색 -->
-
-    <div class="search-bar">
-      <input type="text" placeholder="책 제목 / 저자 / 출판사 검색" />
-
-      <button
-        style="
-                    width: 64px;
-                    height: 43px;
-                    color: white;
-                    cursor: pointer;
-                "
-        onclick={GoBackHome}
-      >
-        종료
-      </button>
-    </div>
-
-    <!-- 필터 -->
-
-    <div class="filters">
-      <button class="element-button filter active">전체</button>
-      <button class="element-button filter">읽는 중</button>
-      <button class="element-button filter">완독</button>
-    </div>
-
-    <!-- 리스트 -->
-
-    <div class="list">
-      {#each BookList as info}
-        <button class="book" onclick={() => ClickBookListFromModal(info)}>
-          <img src={info.thumbnail} alt="thumbnail" />
-
-          <div class="info">
-            <div class="title">
-              {info.title}
-            </div>
-
-            <div class="author">
-              {info.author}
-            </div>
-
-            <div class="status">
-              진행률 {info.progress || 0}%
-            </div>
-          </div>
-
-          {#if LastViewedBookId == info.id && info.progress != 100}
-            <div class="badge reading">읽는 중</div>
-          {/if}
-
-          {#if info.progress == 100}
-            <div class="badge done">완독</div>
-          {/if}
-        </button>
-      {/each}
-    </div>
-  </div>
-</dialog>
-
 <style>
-  .button_panel {
-    flex-direction: row;
-    gap: 0px;
-
-    background-color: #fff8;
-    backdrop-filter: blur(2px);
-
-    border-radius: 16px;
-
-    padding: 16px;
-  }
-
-  .book_modal {
-    padding: 0;
-
-    border: none;
-
-    background: transparent;
-
-    box-shadow: none;
-
-    width: fit-content;
-    height: fit-content;
-
-    max-height: 80vh;
-
-    overflow: hidden;
-
-    opacity: 1;
-    transform: translateY(0);
-
-    transition:
-      opacity 0.25s ease,
-      transform 0.25s ease;
-  }
-
-  .book_modal::backdrop {
-    background: rgba(0, 0, 0, 0.5);
-  }
-
-  /* 닫힐 때 */
-  .book_modal.closing {
-    opacity: 0;
-    transform: translateY(40px);
-  }
-  .book_modal[open] {
-    animation: modalShow 0.25s ease;
-  }
-
-  @keyframes modalShow {
-    from {
-      opacity: 0;
-      transform: translateY(40px);
-    }
-
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  /* 여기부터는 페이지 관련 */
-  .center_contents {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-  }
-
-  .button_style {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 64px;
-    height: 64px;
-    user-select: none;
-    border-radius: 8px;
-    border: 3px double var(--threejs-button-border);
-    background-color: var(--threejs-button);
-    margin-right: 16px;
-    cursor: pointer;
-    padding: 0px;
-    font-size: 16px;
-  }
-
   /* 페이지 입력칸에 위아래 숫자 스피너 제거 */
 
   input[type="number"] {
@@ -2278,125 +2046,5 @@
   input[type="number"]::-webkit-inner-spin-button {
     -webkit-appearance: none;
     margin: 0;
-  }
-
-  /* modal 에서 사용하는 css */
-
-  .container {
-    max-width: 900px;
-    margin: 0 auto;
-    padding: 16px;
-  }
-
-  /* 검색 */
-
-  .search-bar {
-    display: flex;
-    margin-bottom: 12px;
-  }
-
-  .search-bar input {
-    flex: 1;
-    min-width: 0;
-    padding: 10px;
-    border: 1px solid var(--book-list-filter-border);
-    border-radius: 6px;
-  }
-
-  .search-bar button {
-    margin-left: 12px;
-    padding: 10px;
-    border: 1px solid var(--book-list-filter-border);
-    border-radius: 6px;
-    text-align: center;
-    background-color: #4444;
-  }
-
-  /* 필터 */
-
-  .filters {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
-  }
-
-  .filter {
-    padding: 6px 12px;
-    background: var(--book-list-background);
-    border: 1px solid var(--book-list-filter-border);
-    border-radius: 20px;
-    cursor: pointer;
-    font-size: 13px;
-  }
-
-  .filter.active {
-    background: var(--book-list-filter-bg);
-    border-color: var(--book-list-filter-border);
-  }
-
-  /* 리스트 */
-
-  .list {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    max-height: 60vh;
-    overflow-y: auto;
-  }
-
-  .book {
-    display: flex;
-    background: white;
-    padding: 12px;
-    border-radius: 10px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
-    align-items: center;
-    gap: 12px;
-    cursor: pointer;
-  }
-
-  .book img {
-    width: 60px;
-    height: 90px;
-    object-fit: cover;
-    border-radius: 6px;
-  }
-
-  .info {
-    flex: 1;
-    text-align: initial;
-  }
-
-  .title {
-    font-weight: bold;
-    margin-bottom: 4px;
-    color: black;
-  }
-
-  .author {
-    font-size: 13px;
-    color: #666;
-  }
-
-  .status {
-    font-size: 12px;
-    margin-top: 6px;
-    color: #888;
-  }
-
-  .badge {
-    padding: 4px 8px;
-    border-radius: 12px;
-    font-size: 12px;
-  }
-
-  .badge.reading {
-    background: #e6f0ff;
-    color: #2b6fff;
-  }
-
-  .badge.done {
-    background: #e6f7ea;
-    color: #1a9c4b;
   }
 </style>
