@@ -1,5 +1,8 @@
 <script lang="ts">
+  import Login from "$lib/components/+login.svelte";
   import Viewer from "$lib/components/viewer.svelte";
+  import { onMount } from "svelte";
+  import { fade } from "svelte/transition";
 
   const media = window.matchMedia("(prefers-color-scheme: dark)");
 
@@ -11,11 +14,25 @@
   media.addEventListener("change", (e) => {
     document.documentElement.dataset.theme = e.matches ? "dark" : "light";
   });
+
+  let showLogin = $state(false);
+
+  onMount(() => {
+    setTimeout(() => {
+      showLogin = true;
+    }, 1500);
+  });
 </script>
 
 <div style="height: 100%;">
   <Viewer />
 </div>
+
+{#if showLogin}
+  <div transition:fade>
+    <Login />
+  </div>
+{/if}
 
 <style lang="scss">
   * {

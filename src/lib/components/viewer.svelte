@@ -107,40 +107,13 @@
     // 버튼을 누르면 책을 단상 위에 다시 올려둠
     await ChooseBtn();
     // 애니메이션이 종료되면 리스트 모달 띄우기
-    BookListModal.showModal();
-  }
-  let BookListModal: any;
-  let isClosing = $state(false);
-
-  /** esc 등으로 꺼지는 순간 포착 */
-  function handleBackdrop(e: any) {
-    e.preventDefault();
-    CloseModal();
   }
 
-  /** backdrop 클릭 검토하기 */
-  function handleClick(e: MouseEvent) {
-    // dialog 바깥(backdrop) 클릭만 걸러내기
-    if (e.target === BookListModal) {
-      CloseModal();
-    }
-  }
-
-  async function CloseModal() {
-    isClosing = true;
-
-    await new Promise((r) => setTimeout(r, 250));
-
-    BookListModal.close();
-
-    isClosing = false;
-  }
   /** 마지막에 본 책 id를 기억해서 로딩 중복을 하지 않음 */
   let LastViewedBookId = $state("");
   /** 모달에서 책 정보를 클릭함 */
   async function ClickBookListFromModal(info: BookInfo) {
     // 모달은 닫기
-    CloseModal();
     if (LastViewedBookId == info.id) return;
     CurrentBookInfo = info;
     // 이미 존재하는 책이 있다면 빼내기 애니메이션
