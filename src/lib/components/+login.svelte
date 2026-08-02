@@ -2,8 +2,9 @@
     import { onMount } from "svelte";
     // api.ts 파일에서 3가지 함수를 모두 가져옵니다. (loginUser는 아직 안 만드셨다면 하단 설명을 참고하세요)
     import { registerUser, socialLogin, loginUser } from "$lib/services/server";
+    import { status } from "$lib/services/global";
 
- let Kakao: any;
+    let Kakao: any;
 
     // Svelte 5 상태 관리
     let email = $state<string>("");
@@ -43,8 +44,7 @@
             // 로그인 모드일 때
             result = await loginUser(email, password, SERVER_URL);
             if (result.success) {
-                alert("로그인 성공!");
-                // TODO: 메인 페이지로 이동 (예: window.location.href = '/')
+                status.set("main");
             } else {
                 alert(result.error);
             }
@@ -74,8 +74,7 @@
                         );
 
                         if (result.success) {
-                            alert("카카오 로그인 성공!");
-                            // TODO: 메인 페이지 이동
+                            status.set("main");
                         } else {
                             alert(result.error);
                         }

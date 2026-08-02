@@ -1,6 +1,8 @@
 <script lang="ts">
   import Login from "$lib/components/+login.svelte";
+  import Main from "$lib/components/+main.svelte";
   import Viewer from "$lib/components/viewer.svelte";
+  import { status } from "$lib/services/global";
   import { onMount } from "svelte";
   import { fade } from "svelte/transition";
 
@@ -15,11 +17,9 @@
     document.documentElement.dataset.theme = e.matches ? "dark" : "light";
   });
 
-  let showLogin = $state(false);
-
   onMount(() => {
     setTimeout(() => {
-      showLogin = true;
+      status.set("login");
     }, 1500);
   });
 </script>
@@ -28,9 +28,13 @@
   <Viewer />
 </div>
 
-{#if showLogin}
+{#if $status == "login"}
   <div transition:fade>
     <Login />
+  </div>
+{:else if $status == "main"}
+  <div transition:fade>
+    <Main />
   </div>
 {/if}
 
