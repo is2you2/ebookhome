@@ -1,30 +1,85 @@
 <script lang="ts">
     import { fade } from "svelte/transition";
 
-    // Svelte 5 탭 상태 관리
+    // 🌟 뷰어 코드에서 가져온 도서 정보 인터페이스 적용
+    interface BookInfo {
+        id: string;
+        title: string;
+        desc?: string;
+        thumbnail: string;
+        video_thumbnail?: string;
+        epub_url: string;
+        last_view?: number;
+        purchase_time: number;
+        author: string;
+        user_read?: number;
+        progress?: number;
+        price?: number; // 스토어용 임시 속성
+    }
+
+    // Svelte 5 탭 및 상태 관리
     type TabType = "myBooks" | "store" | "profile";
     let activeTab = $state<TabType>("myBooks");
 
-    // 🌟 약관 및 라이선스 모달 상태 관리
     type ModalType = "business" | "terms" | "privacy" | "license" | null;
     let openModal = $state<ModalType>(null);
 
-    // UI 숨김 상태 (책을 클릭해서 3D 배경의 리더기로 진입할 때 사용)
     let isReadingMode = $state<boolean>(false);
 
-    // 향후 DB에서 불러올 목업 데이터
-    const mockBooks = [1, 2, 3, 4, 5, 6];
+    // 🌟 실제 정보를 기반으로 한 샘플 데이터 구성
+    let BookList = $state<BookInfo[]>([
+        {
+            id: "test_book_id_0",
+            title: "바이블일러스트큐티",
+            desc: "말풍선 글짓기 QT",
+            thumbnail: "assets/books/00/thumbnail.jpg",
+            video_thumbnail: "assets/books/00/cover.mp4", // 비디오 표지 존재
+            epub_url: "assets/books/00/book.epub",
+            purchase_time: Date.now(),
+            author: "최정훈",
+            user_read: 0,
+            progress: 45,
+        },
+        {
+            id: "test_book_id_1",
+            title: "기독교의 기본 진리",
+            desc: "신앙의 기초를 다지는 책",
+            thumbnail:
+                "https://via.placeholder.com/300x450/222/fff?text=Book+Cover", // 일반 이미지 표지
+            epub_url: "assets/books/01/book.epub",
+            purchase_time: Date.now() - 86400000,
+            author: "존 스토트",
+            user_read: 12,
+            progress: 100,
+        },
+    ]);
 
-    // 책 읽기 실행 (UI를 숨기고 3D 배경을 보여줌)
-    const readBook = (bookId: number) => {
-        console.log(`${bookId}번 책을 3D 리더기로 엽니다.`);
+    // 스토어 탭을 위한 더미 도서
+    let StoreList = $state<BookInfo[]>([
+        {
+            id: "store_book_id_0",
+            title: "새로운 비디오 책 샘플",
+            thumbnail: "assets/thumbnail2.jpg",
+            video_thumbnail: "assets/vid_cover_sample2.mp4",
+            epub_url: "assets/02.epub",
+            purchase_time: 0,
+            author: "작자미상",
+            price: 15000,
+        },
+    ]);
+
+    // 🌟 책 읽기 실행 (Viewer로 정보 전달 준비)
+    const readBook = (book: BookInfo) => {
+        console.log(`[${book.title}] 책을 3D 리더기로 엽니다.`);
         isReadingMode = true;
+
+        // TODO: 향후 여기에 Viewer 컴포넌트의 LoadEpubFromURL(book) 등
+        // 로드 함수를 호출하거나, 전역 상태 스토어에 currentBook을 설정하는 로직이 들어갑니다.[cite: 2]
     };
 </script>
 
-<!-- 1. 3D 캔버스 배경 레이어 (항상 뒤에 존재하며, 이북 리더기 역할을 함) -->
 <div id="canvas-container">
-    <!-- 독서 모드일 때 다시 UI로 돌아오는 버튼 -->
+    <!-- 여기에 Viewer의 Three.js 캔버스가 존재함[cite: 2] -->
     {#if isReadingMode}
         <button class="back-to-ui-btn" onclick={() => (isReadingMode = false)}>
             ← 내 서재로 돌아가기
@@ -32,35 +87,26 @@
     {/if}
 </div>
 
-<!-- 2. UI 오버레이 레이어 (독서 모드일 때는 숨김 처리) -->
 {#if !isReadingMode}
     <div class="ui-overlay" transition:fade>
         <main class="dashboard-box">
-            <!-- 상단 탭 내비게이션 -->
             <header class="tab-header">
                 <button
                     class="tab-btn {activeTab === 'myBooks' ? 'active' : ''}"
-                    onclick={() => (activeTab = "myBooks")}
+                    onclick={() => (activeTab = "myBooks")}>내 서재</button
                 >
-                    내 서재
-                </button>
                 <button
                     class="tab-btn {activeTab === 'store' ? 'active' : ''}"
-                    onclick={() => (activeTab = "store")}
+                    onclick={() => (activeTab = "store")}>전체 도서</button
                 >
-                    전체 도서
-                </button>
                 <button
                     class="tab-btn {activeTab === 'profile' ? 'active' : ''}"
-                    onclick={() => (activeTab = "profile")}
+                    onclick={() => (activeTab = "profile")}>내 정보</button
                 >
-                    내 정보
-                </button>
             </header>
 
-            <!-- 탭 콘텐츠 영역 -->
             <section class="tab-content">
-                <!-- [탭 1] 내가 구매한 책 (내 서재) -->
+                <!-- [탭 1] 내 서재 -->
                 {#if activeTab === "myBooks"}
                     <div class="content-header">
                         <h2>읽고 있는 책</h2>
@@ -69,23 +115,42 @@
                         </div>
                     </div>
                     <div class="book-grid">
-                        {#each mockBooks as book}
+                        {#each BookList as book}
                             <!-- svelte-ignore a11y_click_events_have_key_events -->
                             <!-- svelte-ignore a11y_no_static_element_interactions -->
                             <div
                                 class="book-card"
                                 onclick={() => readBook(book)}
                             >
-                                <div class="book-cover">표지 {book}</div>
+                                <div class="book-cover">
+                                    <!-- 🌟 비디오 표지가 있으면 자동 재생 비디오 출력, 없으면 이미지 출력 -->
+                                    {#if book.video_thumbnail}
+                                        <!-- 비디오 자동 재생 속성(autoplay, loop, muted, playsinline) 필수 -->
+                                        <video
+                                            src={book.video_thumbnail}
+                                            autoplay
+                                            loop
+                                            muted
+                                            playsinline
+                                            class="cover-media"
+                                        ></video>
+                                    {:else}
+                                        <img
+                                            src={book.thumbnail}
+                                            alt={book.title}
+                                            class="cover-media"
+                                        />
+                                    {/if}
+                                </div>
                                 <div class="book-info">
-                                    <h3>전자책 제목 {book}</h3>
-                                    <p>읽음 45%</p>
+                                    <h3>{book.title}</h3>
+                                    <p>읽음 {book.progress || 0}%</p>
                                 </div>
                             </div>
                         {/each}
                     </div>
 
-                    <!-- [탭 2] 책 목록 (스토어) -->
+                    <!-- [탭 2] 스토어 -->
                 {:else if activeTab === "store"}
                     <div class="content-header">
                         <h2>새로운 도서 탐색</h2>
@@ -94,12 +159,33 @@
                         </div>
                     </div>
                     <div class="book-grid">
-                        {#each mockBooks as book}
+                        {#each StoreList as book}
                             <div class="book-card store-card">
-                                <div class="book-cover">표지 {book}</div>
+                                <div class="book-cover">
+                                    {#if book.video_thumbnail}
+                                        <video
+                                            src={book.video_thumbnail}
+                                            autoplay
+                                            loop
+                                            muted
+                                            playsinline
+                                            class="cover-media"
+                                        ></video>
+                                    {:else}
+                                        <img
+                                            src={book.thumbnail}
+                                            alt={book.title}
+                                            class="cover-media"
+                                        />
+                                    {/if}
+                                </div>
                                 <div class="book-info">
-                                    <h3>새로운 도서 {book}</h3>
-                                    <p>15,000원</p>
+                                    <h3>{book.title}</h3>
+                                    <p>
+                                        {book.price
+                                            ? `${book.price.toLocaleString()}원`
+                                            : "무료"}
+                                    </p>
                                 </div>
                                 <button class="buy-btn">구매하기</button>
                             </div>
@@ -395,14 +481,23 @@
     .book-cover {
         width: 100%;
         aspect-ratio: 2/3;
-        background: rgba(255, 255, 255, 0.1);
+        background: rgba(25, 25, 25, 0.4);
         border-radius: 8px;
         display: flex;
         justify-content: center;
         align-items: center;
-        color: rgba(255, 255, 255, 0.4);
         margin-bottom: 12px;
+        overflow: hidden; /* 모서리 둥글게 잘리도록 오버플로우 숨김 */
+        position: relative;
     }
+
+    .cover-media {
+        width: 100%;
+        height: 100%;
+        object-fit: cover; /* 비율을 유지하며 꽉 차게 렌더링 */
+        display: block;
+    }
+
     .book-info h3 {
         font-size: 15px;
         margin: 0 0 4px 0;
