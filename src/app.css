@@ -27,6 +27,12 @@ button {
   --book-list-filter-bg: #bbb;
   --book-list-filter-border: #ccc;
 
+  --toast-default: #b95437dd;
+  --toast-alert: #b44d;
+  --toast-repeat-border: #ffd94e;
+  --toast-repeat-bg: #ffd94ebb;
+  --toast-repeat-bg-end: #ffd94e00;
+
   --toast-background-color: #4f46e588;
   --loading-waiting-color: #ddd;
   --loading-done-color: #4f46e5;
@@ -51,6 +57,12 @@ button {
   --book-list-background: #ddd;
   --book-list-filter-bg: #bbb;
   --book-list-filter-border: #ccc;
+
+  --toast-default: #58a192dd;
+  --toast-alert: #b44d;
+  --toast-repeat-border: #ffd94e;
+  --toast-repeat-bg: #ffd94ebb;
+  --toast-repeat-bg-end: #ffd94e00;
 
   --toast-background-color: #c56b5088;
   --loading-waiting-color: #ddd;

@@ -145,7 +145,7 @@
         top: 0;
         left: 0;
         height: 100%;
-        background: var(--toast-progress);
+        background: var(--toast-default);
         transition: width 0.3s ease-out; /* 부드러운 움직임 */
     }
 

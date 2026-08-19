@@ -23,7 +23,7 @@ export class ToastManager {
         return [...this.allToasts].sort((a, b) => b.created_at - a.created_at);
     }
 
-    upsertToast(newToast: Omit<Toast, 'created_at'>) {
+    upsertToast(newToast: Omit<Toast, 'created_at'>, silent = false) {
         // 메시지 내용이 없다면 무시
         if (!newToast.message) return;
         // 아이디 공란시 자동 설정
@@ -45,7 +45,7 @@ export class ToastManager {
         // 동일한 메시지인지 검토
         const isSameMessage = index !== -1 && this.allToasts[index].message === newToast.message && newToast.progress === undefined;
         // 기존 토스트와 ID+메시지가 같다면 Alert 상태 트리거
-        const isAlert = isSameMessage;
+        const isAlert = !silent && isSameMessage;
 
         const alertTrigger = isSameMessage ? (this.allToasts[index].alertTrigger || 0) + 1 : 0;
 

@@ -14,6 +14,7 @@
   import JSZip from "jszip";
   import { cubicOut } from "svelte/easing";
   import { currentBook } from "$lib/services/global";
+  import { toastManager } from "./toast.svelte";
 
   interface PageInfo {
     root: any;
@@ -991,6 +992,11 @@
     /** jpg 퀄리티 */
     const quality = 0.9;
     for (let i = 0, j = PagePaths.length; i < j; i++) {
+      toastManager.upsertToast({
+        id: actId,
+        message: `페이지를 준비하는 중: ${i + 1} / ${j}`,
+        progress: ((i + 1) / j) * 100,
+      });
       const blob = await getImageBlob(epub, PagePaths[i]);
       await indexed.saveBlobToUserPath(blob, PagePaths[i]);
       const FileURL = URL.createObjectURL(blob);
@@ -1834,6 +1840,10 @@
     isEPubLoaded = false;
     LastViewedBookId = info.id;
     const actId = "loadEpub";
+    toastManager.upsertToast({
+      id: actId,
+      message: "전자책 정보를 다운받는 중",
+    });
     try {
       const response = await fetch(info.epub_url);
       if (!response.ok)
@@ -1857,7 +1867,11 @@
 
         if (total) {
           const percent = (receivedLength / total) * 100;
-          // 필요하면 UI 업데이트: progress bar 등
+          toastManager.upsertToast({
+            id: actId,
+            message: "전자책 정보를 다운받는 중",
+            progress: percent,
+          });
         }
       }
 
