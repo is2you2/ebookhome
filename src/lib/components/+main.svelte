@@ -1,21 +1,7 @@
 <script lang="ts">
+    import { currentBook, type BookInfo } from "$lib/services/global";
     import { fade } from "svelte/transition";
-
-    // 🌟 뷰어 코드에서 가져온 도서 정보 인터페이스 적용
-    interface BookInfo {
-        id: string;
-        title: string;
-        desc?: string;
-        thumbnail: string;
-        video_thumbnail?: string;
-        epub_url: string;
-        last_view?: number;
-        purchase_time: number;
-        author: string;
-        user_read?: number;
-        progress?: number;
-        price?: number; // 스토어용 임시 속성
-    }
+    // 🌟 global.ts에서 인터페이스와 currentBook 스토어를 가져옵니다. (경로는 실제 구조에 맞게 수정하세요)
 
     // Svelte 5 탭 및 상태 관리
     type TabType = "myBooks" | "store" | "profile";
@@ -26,14 +12,14 @@
 
     let isReadingMode = $state<boolean>(false);
 
-    // 🌟 실제 정보를 기반으로 한 샘플 데이터 구성
+    // 실제 정보를 기반으로 한 샘플 데이터 구성
     let BookList = $state<BookInfo[]>([
         {
             id: "test_book_id_0",
             title: "바이블일러스트큐티",
             desc: "말풍선 글짓기 QT",
             thumbnail: "assets/books/00/thumbnail.jpg",
-            video_thumbnail: "assets/books/00/cover.mp4", // 비디오 표지 존재
+            video_thumbnail: "assets/books/00/cover.mp4",
             epub_url: "assets/books/00/book.epub",
             purchase_time: Date.now(),
             author: "최정훈",
@@ -68,13 +54,15 @@
         },
     ]);
 
-    // 🌟 책 읽기 실행 (Viewer로 정보 전달 준비)
+    // 🌟 책 읽기 실행 시 currentBook 상태 업데이트
     const readBook = (book: BookInfo) => {
         console.log(`[${book.title}] 책을 3D 리더기로 엽니다.`);
-        isReadingMode = true;
 
-        // TODO: 향후 여기에 Viewer 컴포넌트의 LoadEpubFromURL(book) 등
-        // 로드 함수를 호출하거나, 전역 상태 스토어에 currentBook을 설정하는 로직이 들어갑니다.[cite: 2]
+        // 1. 전역 상태에 선택한 책 정보를 저장합니다.
+        currentBook.set(book); // 또는 $currentBook = book;
+
+        // 2. 뷰어(읽기 모드)를 활성화합니다.
+        isReadingMode = true;
     };
 </script>
 

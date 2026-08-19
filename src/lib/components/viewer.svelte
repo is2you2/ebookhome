@@ -13,6 +13,7 @@
 
   import JSZip from "jszip";
   import { cubicOut } from "svelte/easing";
+  import { currentBook } from "$lib/services/global";
 
   interface PageInfo {
     root: any;
@@ -33,6 +34,14 @@
     user_read?: number;
     progress?: number;
   }
+
+  // currentBook의 변화를 감지하여 책을 불러오는 반응형 로직
+  $effect(() => {
+    if ($currentBook) {
+      console.log("새로운 책 로드 시작:", $currentBook.title);
+      ClickBookListFromModal($currentBook);
+    }
+  });
 
   onMount(() => {
     requestAnimationFrame(() => {
