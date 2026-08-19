@@ -339,14 +339,12 @@
         left: 0;
         width: 100%;
         height: 100%;
-        z-index: 0;
     }
 
     .back-to-ui-btn {
         position: absolute;
         top: 20px;
         left: 20px;
-        z-index: 20;
         padding: 12px 20px;
         background: rgba(0, 0, 0, 0.6);
         color: white;
@@ -366,7 +364,6 @@
         left: 0;
         width: 100%;
         height: 100%;
-        z-index: 10;
         display: flex;
         justify-content: center;
         align-items: center;
@@ -630,7 +627,6 @@
         width: 100%;
         height: 100%;
         background: rgba(0, 0, 0, 0.6);
-        z-index: 100;
         display: flex;
         justify-content: center;
         align-items: center;

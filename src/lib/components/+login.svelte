@@ -211,7 +211,6 @@
         left: 0;
         width: 100%;
         height: 100%;
-        z-index: 0;
     }
     #bg-3d {
         width: 100%;
@@ -224,7 +223,6 @@
         left: 0;
         width: 100%;
         height: 100%;
-        z-index: 10;
         display: flex;
         justify-content: center;
         align-items: center;

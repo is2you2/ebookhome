@@ -1,6 +1,7 @@
 <script lang="ts">
   import Login from "$lib/components/+login.svelte";
   import Main from "$lib/components/+main.svelte";
+  import Toast from "$lib/components/+toast.svelte";
   import Viewer from "$lib/components/viewer.svelte";
   import { status } from "$lib/services/global";
   import { onMount } from "svelte";
@@ -37,6 +38,8 @@
     <Main />
   </div>
 {/if}
+
+<Toast />
 
 <style lang="scss">
   * {
