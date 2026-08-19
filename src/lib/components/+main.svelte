@@ -230,10 +230,6 @@
                                     <li>better-sqlite3 (MIT License)</li>
                                 </ul>
                             {:else}
-                                <p>
-                                    여기에 길고 지루한 법적 텍스트가
-                                    들어갑니다...
-                                </p>
                                 <p>제 1조 (목적)...</p>
                             {/if}
                         </div>

@@ -26,6 +26,10 @@
 
     // 2. 이메일/비밀번호 폼 제출 핸들러
     async function handleEmailSubmit(e: Event) {
+        // 테스트 기간 무조건 진입 처리
+        status.set("main");
+        return;
+
         e.preventDefault();
         isLoading = true;
 
@@ -136,7 +140,12 @@
                 />
             </div>
 
-            <button type="submit" class="login-btn" disabled={isLoading}>
+            <button
+                type="submit"
+                class="login-btn"
+                disabled={isLoading}
+                onclick={handleEmailSubmit}
+            >
                 {#if isLoading}
                     처리 중...
                 {:else}
