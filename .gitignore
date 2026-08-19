@@ -25,4 +25,5 @@ vite.config.ts.timestamp-*
 # 컨텐츠 파일들 무시
 *.mp4
 *.epub
+**/thumbnail.jpg
 static/assets/thumbnail.jpg
