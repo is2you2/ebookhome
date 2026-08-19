@@ -19,5 +19,10 @@ export interface BookInfo {
 const statusString = 'init' as 'init' | 'login' | 'main';
 export const status = writable(statusString);
 
+export const isReadingMode = writable(false);
+
+/** 컴포넌트간 행동 공유용 [key] = function */
+export let TransferAct = {};
+
 // 🌟 현재 뷰어에서 읽기 위해 선택된 책 정보를 관리하는 전역 상태
 export const currentBook = writable<BookInfo | null>(null);

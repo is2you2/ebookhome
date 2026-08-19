@@ -1,5 +1,10 @@
 <script lang="ts">
-    import { currentBook, type BookInfo } from "$lib/services/global";
+    import {
+        currentBook,
+        isReadingMode,
+        TransferAct,
+        type BookInfo,
+    } from "$lib/services/global";
     import { fade } from "svelte/transition";
     // 🌟 global.ts에서 인터페이스와 currentBook 스토어를 가져옵니다. (경로는 실제 구조에 맞게 수정하세요)
 
@@ -9,8 +14,6 @@
 
     type ModalType = "business" | "terms" | "privacy" | "license" | null;
     let openModal = $state<ModalType>(null);
-
-    let isReadingMode = $state<boolean>(false);
 
     // 실제 정보를 기반으로 한 샘플 데이터 구성
     let BookList = $state<BookInfo[]>([
@@ -62,20 +65,26 @@
         currentBook.set(book); // 또는 $currentBook = book;
 
         // 2. 뷰어(읽기 모드)를 활성화합니다.
-        isReadingMode = true;
+        isReadingMode.set(true);
     };
 </script>
 
 <div id="canvas-container">
     <!-- 여기에 Viewer의 Three.js 캔버스가 존재함[cite: 2] -->
-    {#if isReadingMode}
-        <button class="back-to-ui-btn" onclick={() => (isReadingMode = false)}>
+    {#if $isReadingMode}
+        <button
+            class="back-to-ui-btn"
+            onclick={() => {
+                isReadingMode.set(false);
+                TransferAct["OpenBookList"]?.();
+            }}
+        >
             ← 내 서재로 돌아가기
         </button>
     {/if}
 </div>
 
-{#if !isReadingMode}
+{#if !$isReadingMode}
     <div class="ui-overlay" transition:fade>
         <main class="dashboard-box">
             <header class="tab-header">
@@ -339,6 +348,7 @@
         left: 0;
         width: 100%;
         height: 100%;
+        pointer-events: none;
     }
 
     .back-to-ui-btn {
@@ -353,6 +363,7 @@
         backdrop-filter: blur(4px);
         cursor: pointer;
         font-weight: 600;
+        pointer-events: all;
     }
     .back-to-ui-btn:hover {
         background: rgba(0, 0, 0, 0.8);

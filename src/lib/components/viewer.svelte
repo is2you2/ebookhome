@@ -13,8 +13,13 @@
 
   import JSZip from "jszip";
   import { cubicOut } from "svelte/easing";
-  import { currentBook } from "$lib/services/global";
+  import {
+    currentBook,
+    isReadingMode,
+    TransferAct,
+  } from "$lib/services/global";
   import { toastManager } from "./toast.svelte";
+  import { fly } from "svelte/transition";
 
   interface PageInfo {
     root: any;
@@ -45,6 +50,7 @@
   });
 
   onMount(() => {
+    TransferAct["OpenBookList"] = OpenBookList;
     requestAnimationFrame(() => {
       const targetDiv = document.getElementById("viewer");
       initThreeWithGLB(targetDiv as HTMLDivElement).then(() => {
@@ -91,32 +97,16 @@
   let singlePageForm = false;
   /** 표지 보기 상태에 따라 애니메이션 적용 */
   let LookCoverStatus = $state("idle");
-  /** 내가 보유한 책 정보 */
-  let BookList: BookInfo[] = $state([]);
   /** 선택된 책 정보를 기억 */
   let CurrentBookInfo: BookInfo;
 
   /** 책 목록 가져오기 (Modal) */
   async function OpenBookList() {
-    // 테스트 정보 수집
-    // 이 자리에 나중에 실제로 서버로부터 리스트 받기 행동이 필요함
-    if (!BookList.length)
-      BookList = [
-        {
-          id: "test_book_id_0",
-          title: "바이블일러스트큐티",
-          desc: "말풍선 글짓기 QT",
-          thumbnail: "assets/thumbnail.jpg",
-          video_thumbnail: "assets/vid_cover_sample.mp4",
-          epub_url: "assets/00.epub",
-          purchase_time: Date.now(),
-          author: "최정훈",
-          user_read: 0,
-        },
-      ];
     // 버튼을 누르면 책을 단상 위에 다시 올려둠
     await ChooseBtn();
-    // 애니메이션이 종료되면 리스트 모달 띄우기
+    // 2. 읽기 상태 종료 (방법 A 또는 B 선택)
+    // [방법 A] currentBook 스토어 초기화 (상위 컴포넌트에서 $effect 등으로 감지 시)
+    currentBook.set(null);
   }
 
   /** 마지막에 본 책 id를 기억해서 로딩 중복을 하지 않음 */
@@ -838,7 +828,7 @@
           opacity: ${t};
           width: ${t * 64}px;
           height: ${t * 64}px;
-          margin-right: ${t * 16}px;
+          margin-left: ${t * 16}px;
           border: ${t * 3}px double var(--threejs-button-border);
           font-size: ${t * 16}px;
         `;
@@ -2028,6 +2018,39 @@
       </span>
     </button>
   {/if}
+
+  {#if $isReadingMode && isEPubLoaded}
+    <div
+      class="center_contents button_panel"
+      style="pointer-events: auto;"
+      transition:fly={{ y: 50 }}
+    >
+      <!-- UI 버튼 -->
+      {#if isEPubLoaded && UserViewPage === 0}
+        <button
+          transition:button_anim
+          class="button_style"
+          onclick={showFrontCover}>표지</button
+        >
+      {/if}
+
+      {#if isEPubLoaded && UserViewPage}
+        <button
+          transition:button_anim
+          class="button_style"
+          onclick={() => PrevPage()}>이전</button
+        >
+      {/if}
+
+      {#if isEPubLoaded && LookCoverStatus != "idle" && UserViewPage != PagePaths?.length - 1}
+        <button
+          transition:button_anim
+          class="button_style"
+          onclick={NextPageBtn}>다음</button
+        >
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -2042,5 +2065,40 @@
   input[type="number"]::-webkit-inner-spin-button {
     -webkit-appearance: none;
     margin: 0;
+  }
+
+  .center_contents {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: absolute;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .button_panel {
+    flex-direction: row;
+    gap: 0px;
+    background-color: #fff8;
+    backdrop-filter: blur(2px);
+    border-radius: 16px;
+    padding: 16px 16px 16px 0px;
+  }
+
+  .button_style {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 64px;
+    height: 64px;
+    user-select: none;
+    border-radius: 8px;
+    border: 3px double var(--threejs-button-border);
+    background-color: var(--threejs-button);
+    margin-left: 16px;
+    cursor: pointer;
+    padding: 0px;
+    font-size: 16px;
   }
 </style>
