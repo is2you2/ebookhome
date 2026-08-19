@@ -1860,7 +1860,7 @@
           toastManager.upsertToast({
             id: actId,
             message: "전자책 정보를 다운받는 중",
-            progress: percent,
+            progress: Math.floor(percent),
           });
         }
       }
