@@ -1,3 +1,4 @@
+<!-- src/lib/components/+main.svelte -->
 <script lang="ts">
     import {
         currentBook,
@@ -6,11 +7,10 @@
         type BookInfo,
     } from "$lib/services/global";
     import { fade } from "svelte/transition";
-    // 🌟 global.ts에서 인터페이스와 currentBook 스토어를 가져옵니다. (경로는 실제 구조에 맞게 수정하세요)
 
-    // Svelte 5 탭 및 상태 관리
     type TabType = "myBooks" | "store" | "profile";
-    let activeTab = $state<TabType>("myBooks");
+
+    let activeTab = $state<TabType>("store");
 
     type ModalType = "business" | "terms" | "privacy" | "license" | null;
     let openModal = $state<ModalType>(null);

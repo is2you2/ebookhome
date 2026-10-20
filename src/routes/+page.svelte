@@ -20,7 +20,7 @@
 
   onMount(() => {
     setTimeout(() => {
-      status.set("login");
+      status.set("main");
     }, 1500);
   });
 </script>
