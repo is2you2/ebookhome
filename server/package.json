@@ -7,11 +7,15 @@
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "package:win": "caxa --input . --output dist/ebook-server.exe -- \"{{caxa}}/node_modules/.bin/node\" \"{{caxa}}/index.js\"",
+    "package:linux": "caxa --input . --output dist/ebook-server -- \"{{caxa}}/node_modules/.bin/node\" \"{{caxa}}/index.js\""
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.1",
     "cors": "^2.8.6",
     "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "caxa": "^3.0.1"
   }
 }
