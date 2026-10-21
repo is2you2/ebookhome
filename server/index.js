@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('node:path');
@@ -6,22 +7,21 @@ const { DatabaseSync } = require('node:sqlite');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const PORTONE_API_SECRET = process.env.PORTONE_API_SECRET || '';
 
-// 미들웨어 설정
 app.use(express.json());
 app.use(cors());
 
-// 🌟 caxa 패키징 대응: 실행 파일이 실행된 현재 작업 디렉터리에 shop.db 생성
+// 🌟 실행 파일 위치에 shop.db 생성 유지
 const DB_PATH = path.join(process.cwd(), 'shop.db');
 const db = new DatabaseSync(DB_PATH);
 
-// 동시성 성능 및 외래키 제약조건 활성화
 db.exec(`
   PRAGMA journal_mode = WAL;
   PRAGMA foreign_keys = ON;
 `);
 
-// 🌟 테이블 초기화 (DDL 다중 실행)
+// 🌟 기존 회원/통계 테이블 + 결제 및 도서 관리 테이블 생성
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,9 +50,78 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- [도서 마스터] 가격 위변조 검증의 기준이 되는 테이블
+  CREATE TABLE IF NOT EXISTS books (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    author TEXT,
+    price INTEGER NOT NULL DEFAULT 0,
+    desc TEXT,
+    thumbnail TEXT,
+    video_thumbnail TEXT,
+    epub_url TEXT
+  );
+
+  -- [결제 영수증] 포트원 거래 내역 기록
+  CREATE TABLE IF NOT EXISTS payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    payment_id TEXT UNIQUE NOT NULL, -- 가맹점 주문 번호
+    user_id INTEGER,
+    book_id TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    currency TEXT DEFAULT 'KRW',
+    status TEXT NOT NULL,           -- PAID, CANCELLED 등
+    pay_method TEXT,
+    receipt_url TEXT,
+    raw_data TEXT,                   -- 포트원 응답 JSON 원본
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (book_id) REFERENCES books (id)
+  );
+
+  -- [소유권] 사용자가 구매한 책 매핑
+  CREATE TABLE IF NOT EXISTS user_books (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    book_id TEXT NOT NULL,
+    payment_id TEXT,
+    purchased_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (book_id) REFERENCES books (id),
+    UNIQUE(user_id, book_id)
+  );
 `);
 
-// 🌟 node:sqlite 트랜잭션 래퍼 도우미 함수
+// 🌟 테스트용 기본 도서 데이터 시딩 (DB가 비어있을 때 삽입)
+const bookCount = db.prepare('SELECT COUNT(*) as count FROM books').get().count;
+if (bookCount === 0) {
+    const insertBook = db.prepare(`
+        INSERT INTO books (id, title, author, price, desc, thumbnail, video_thumbnail, epub_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertBook.run(
+        'test_book_id_0',
+        '바이블일러스트큐티',
+        '최정훈',
+        10000,
+        '말풍선 글짓기 QT',
+        'assets/books/00/thumbnail.jpg',
+        'assets/books/00/cover.mp4',
+        'assets/books/00/book.epub'
+    );
+    insertBook.run(
+        'store_book_id_0',
+        '새로운 비디오 책 샘플',
+        '작자미상',
+        15000,
+        '영상 표지가 포함된 샘플 전자책',
+        'assets/thumbnail2.jpg',
+        'assets/vid_cover_sample2.mp4',
+        'assets/02.epub'
+    );
+}
+
+// 🌟 트랜잭션 래퍼 도우미 함수
 function runTransaction(callback) {
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -65,7 +134,7 @@ function runTransaction(callback) {
     }
 }
 
-// 🌟 Node.js 내장 node:crypto를 활용한 메모리-하드 scrypt 암호화
+// 비밀번호 암호화 헬퍼 함수
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
     const hash = crypto.scryptSync(password, salt, 64).toString('hex');
     return { salt, hash };
@@ -79,6 +148,122 @@ function verifyPassword(password, salt, storedHash) {
         return false;
     }
 }
+
+// ==========================================
+// [도서] 전체 도서 목록 조회 API (스토어 탭용)
+// ==========================================
+app.get('/api/books', (req, res) => {
+    try {
+        const books = db.prepare('SELECT * FROM books').all();
+        res.status(200).json(books);
+    } catch (err) {
+        res.status(500).json({ error: '도서 목록 조회 오류' });
+    }
+});
+
+// ==========================================
+// [도서] 사용자별 구매 도서 목록 조회 API (내 서재 탭용)
+// ==========================================
+app.get('/api/users/:userId/books', (req, res) => {
+    const { userId } = req.params;
+    try {
+        const myBooks = db.prepare(`
+            SELECT b.*, ub.purchased_at 
+            FROM books b
+            INNER JOIN user_books ub ON b.id = ub.book_id
+            WHERE ub.user_id = ?
+        `).all(userId);
+
+        res.status(200).json(myBooks);
+    } catch (err) {
+        res.status(500).json({ error: '구매 도서 목록 조회 오류' });
+    }
+});
+
+// ==========================================
+// 🌟 [결제] 포트원 V2 결제 검증 및 도서 권한 부여 API
+// ==========================================
+app.post('/api/payments/complete', async (req, res) => {
+    const { paymentId, bookId, userId } = req.body;
+
+    if (!paymentId || !bookId) {
+        return res.status(400).json({ error: '결제 정보(paymentId, bookId)가 누락되었습니다.' });
+    }
+
+    try {
+        // 1. 서버 DB에서 해당 도서의 실제 가격 확인
+        const book = db.prepare('SELECT * FROM books WHERE id = ?').get(bookId);
+        if (!book) {
+            return res.status(404).json({ error: '존재하지 않는 도서입니다.' });
+        }
+
+        // 2. 포트원 V2 REST API 단건 조회 호출 (Node 내장 fetch 사용)
+        const portoneRes = await fetch(`https://api.portone.io/payments/${encodeURIComponent(paymentId)}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `PortOne ${PORTONE_API_SECRET}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!portoneRes.ok) {
+            const errData = await portoneRes.json();
+            return res.status(400).json({ error: errData.message || '포트원 결제 내역 조회 실패' });
+        }
+
+        const paymentData = await portoneRes.json();
+
+        // 3. 결제 상태 검증
+        if (paymentData.status !== 'PAID') {
+            return res.status(400).json({ error: `결제가 완료되지 않았습니다. (현재 상태: ${paymentData.status})` });
+        }
+
+        // 4. [핵심] 금액 위변조 검증 (포트원에서 실제로 결제된 금액 == DB의 책 정가)
+        const actualPaidAmount = paymentData.amount?.total;
+        if (actualPaidAmount !== book.price) {
+            return res.status(400).json({
+                error: `결제 금액 위변조 감지: 실 결제액(${actualPaidAmount}원) != 도서 정가(${book.price}원)`
+            });
+        }
+
+        // 5. 결제 영수증 저장 및 사용자 소유권 부여 (트랜잭션)
+        runTransaction(() => {
+            // 영수증 삽입
+            db.prepare(`
+                INSERT INTO payments (payment_id, user_id, book_id, amount, currency, status, pay_method, receipt_url, raw_data)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                paymentId,
+                userId || null,
+                bookId,
+                actualPaidAmount,
+                paymentData.currency || 'KRW',
+                paymentData.status,
+                paymentData.method?.type || 'CARD',
+                paymentData.receiptUrl || null,
+                JSON.stringify(paymentData)
+            );
+
+            // 로그인 사용자인 경우 내 서재(user_books)에 등록
+            if (userId) {
+                db.prepare(`
+                    INSERT OR IGNORE INTO user_books (user_id, book_id, payment_id)
+                    VALUES (?, ?, ?)
+                `).run(userId, bookId, paymentId);
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: '결제 검증 및 도서 구매가 완료되었습니다.',
+            book: book
+        });
+
+    } catch (err) {
+        console.error('결제 검증 오류:', err);
+        return res.status(500).json({ error: '서버 내부 결제 처리 오류가 발생했습니다.' });
+    }
+});
 
 // ==========================================
 // [인증] 일반 회원가입 API
@@ -260,7 +445,6 @@ app.post('/api/login', (req, res) => {
     }
 });
 
-// 서버 실행
 app.listen(PORT, () => {
     console.log(`🚀 서버가 포트 ${PORT}에서 실행 중입니다. (DB: ${DB_PATH})`);
 });
