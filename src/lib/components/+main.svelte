@@ -1,4 +1,3 @@
-<!-- src/lib/components/+main.svelte -->
 <script lang="ts">
     import {
         currentBook,
@@ -6,18 +5,23 @@
         TransferAct,
         type BookInfo,
     } from "$lib/services/global.svelte";
-    import { currentUser } from "$lib/services/server.svelte";
+    import {
+        currentUser,
+        clearToken,
+        fetchMyBooks,
+    } from "$lib/services/server.svelte";
     import Login from "./+login.svelte";
     import { fade } from "svelte/transition";
 
     type TabType = "myBooks" | "store" | "profile";
-    // 🌟 시작 시 '전체 도서' 탭이 기본 열림
     let activeTab = $state<TabType>("store");
 
     type ModalType = "business" | "terms" | "privacy" | "license" | null;
     let openModal = $state<ModalType>(null);
 
-    let BookList = $state<BookInfo[]>([
+    let BookList = $state<BookInfo[]>([]);
+
+    let StoreList = $state<BookInfo[]>([
         {
             id: "test_book_id_0",
             title: "바이블일러스트큐티",
@@ -25,26 +29,10 @@
             thumbnail: "assets/books/00/thumbnail.jpg",
             video_thumbnail: "assets/books/00/cover.mp4",
             epub_url: "assets/books/00/book.epub",
-            purchase_time: Date.now(),
+            purchase_time: 0,
             author: "최정훈",
-            user_read: 0,
-            progress: 45,
+            price: 10000,
         },
-        {
-            id: "test_book_id_1",
-            title: "기독교의 기본 진리",
-            desc: "신앙의 기초를 다지는 책",
-            thumbnail:
-                "https://via.placeholder.com/300x450/222/fff?text=Book+Cover",
-            epub_url: "assets/books/01/book.epub",
-            purchase_time: Date.now() - 86400000,
-            author: "존 스토트",
-            user_read: 12,
-            progress: 100,
-        },
-    ]);
-
-    let StoreList = $state<BookInfo[]>([
         {
             id: "store_book_id_0",
             title: "새로운 비디오 책 샘플",
@@ -57,11 +45,27 @@
         },
     ]);
 
+    $effect(() => {
+        if (currentUser.value && activeTab === "myBooks") {
+            fetchMyBooks().then((books) => {
+                if (books && books.length > 0) {
+                    BookList = books;
+                }
+            });
+        }
+    });
+
     const readBook = (book: BookInfo) => {
-        console.log(`[${book.title}] 책을 3D 리더기로 엽니다.`);
         currentBook.value = book;
         isReadingMode.value = true;
     };
+
+    function handleLogout() {
+        if (confirm("로그아웃 하시겠습니까?")) {
+            clearToken();
+            activeTab = "store"; // 로그아웃 후 스토어 둘러보기로 안전 전환
+        }
+    }
 </script>
 
 <div id="canvas-container">
@@ -264,9 +268,7 @@
                             <div class="danger-zone">
                                 <button
                                     class="logout-btn"
-                                    onclick={() => {
-                                        currentUser.value = null;
-                                    }}
+                                    onclick={handleLogout}
                                 >
                                     로그아웃
                                 </button>

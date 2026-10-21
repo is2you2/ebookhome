@@ -3,6 +3,7 @@
   import Toast from "$lib/components/+toast.svelte";
   import Viewer from "$lib/components/viewer.svelte";
   import { status } from "$lib/services/global.svelte";
+  import { initAuth, recordVisit } from "$lib/services/server.svelte";
   import { onMount } from "svelte";
   import { fade } from "svelte/transition";
 
@@ -18,9 +19,10 @@
   });
 
   onMount(() => {
-    setTimeout(() => {
-      status.value = "main";
-    }, 1500);
+    // 🌟 저장된 JWT 토큰 검증 및 유저 상태 복원
+    initAuth();
+    recordVisit("http://localhost:3000");
+    status.value = "main";
   });
 </script>
 
