@@ -3,7 +3,7 @@
   import Main from "$lib/components/+main.svelte";
   import Toast from "$lib/components/+toast.svelte";
   import Viewer from "$lib/components/viewer.svelte";
-  import { status } from "$lib/services/global";
+  import { status } from "$lib/services/global.svelte";
   import { onMount } from "svelte";
   import { fade } from "svelte/transition";
 
@@ -20,7 +20,7 @@
 
   onMount(() => {
     setTimeout(() => {
-      status.set("main");
+      status.value = "main";
     }, 1500);
   });
 </script>
@@ -29,11 +29,11 @@
   <Viewer />
 </div>
 
-{#if $status == "login"}
+{#if status.value == "login"}
   <div transition:fade>
     <Login />
   </div>
-{:else if $status == "main"}
+{:else if status.value == "main"}
   <div transition:fade>
     <Main />
   </div>

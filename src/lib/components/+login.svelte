@@ -1,8 +1,12 @@
 <script lang="ts">
+    import { status } from "$lib/services/global.svelte";
+    import {
+        loginUser,
+        registerUser,
+        socialLogin,
+    } from "$lib/services/server.svelte";
     import { onMount } from "svelte";
     // api.ts 파일에서 3가지 함수를 모두 가져옵니다. (loginUser는 아직 안 만드셨다면 하단 설명을 참고하세요)
-    import { registerUser, socialLogin, loginUser } from "$lib/services/server";
-    import { status } from "$lib/services/global";
 
     let Kakao: any;
 
@@ -26,10 +30,6 @@
 
     // 2. 이메일/비밀번호 폼 제출 핸들러
     async function handleEmailSubmit(e: Event) {
-        // 테스트 기간 무조건 진입 처리
-        status.set("main");
-        return;
-
         e.preventDefault();
         isLoading = true;
 
@@ -48,7 +48,7 @@
             // 로그인 모드일 때
             result = await loginUser(email, password, SERVER_URL);
             if (result.success) {
-                status.set("main");
+                status.value = "main";
             } else {
                 alert(result.error);
             }
@@ -78,7 +78,7 @@
                         );
 
                         if (result.success) {
-                            status.set("main");
+                            status.value = "main";
                         } else {
                             alert(result.error);
                         }

@@ -1,8 +1,20 @@
+// src/lib/services/indexed.svelte.ts
+
 class IndexedDB {
-    svelteDB: IDBDatabase | null = null;
+    // 🌟 { value: _val } 형태의 반응형 DB 인스턴스 및 초기화 상태
+    db = $state<{ value: IDBDatabase | null }>({ value: null });
+    isReady = $state<{ value: boolean }>({ value: false });
+
+    // 내부 호환용 getter/setter
+    get svelteDB(): IDBDatabase | null {
+        return this.db.value;
+    }
+    set svelteDB(database: IDBDatabase | null) {
+        this.db.value = database;
+    }
 
     initialize(_CallBack = () => { }) {
-        if (this.svelteDB) {
+        if (this.db.value) {
             _CallBack();
             return;
         }
@@ -16,13 +28,14 @@ class IndexedDB {
         };
 
         req.onsuccess = (e: any) => {
-            const db = e.target.result;
-            db.close();
+            const tempDb = e.target.result;
+            tempDb.close();
 
             const second_req = indexedDB.open('/svfs', 11);
 
-            second_req.onsuccess = (e: any) => {
-                this.svelteDB = e.target.result;
+            second_req.onsuccess = (ev: any) => {
+                this.db.value = ev.target.result;
+                this.isReady.value = true;
                 _CallBack();
                 removeSignals();
             };
@@ -34,10 +47,11 @@ class IndexedDB {
         };
 
         req.onerror = () => {
-            const req = indexedDB.open('/svfs', 11);
+            const second_req = indexedDB.open('/svfs', 11);
 
-            req.onsuccess = (e: any) => {
-                this.svelteDB = e.target.result;
+            second_req.onsuccess = (e: any) => {
+                this.db.value = e.target.result;
+                this.isReady.value = true;
                 _CallBack();
                 removeSignals();
             };
@@ -45,7 +59,7 @@ class IndexedDB {
     }
 
     /** recursive directory */
-    private createRecursiveDirectory(path: string, targetDB = this.svelteDB!) {
+    private createRecursiveDirectory(path: string, targetDB = this.db.value!) {
         const lastIndexOf = path.lastIndexOf('/');
         const dir = path.substring(0, lastIndexOf);
         if (!dir) return;
@@ -72,7 +86,7 @@ class IndexedDB {
                 put.onerror = null;
             };
 
-            put.onsuccess = (ev: any) => {
+            put.onsuccess = () => {
                 this.createRecursiveDirectory(dir, targetDB);
                 removeSignals();
             };
@@ -89,7 +103,7 @@ class IndexedDB {
             this.checkIfFileExist(path).then((b) => {
                 if (b) return reject('AlreadyExistFolder');
 
-                const put = this.svelteDB!
+                const put = this.db.value!
                     .transaction('FILE_DATA', 'readwrite')
                     .objectStore('FILE_DATA')
                     .put(
@@ -100,25 +114,20 @@ class IndexedDB {
                         `/userfs/${path}`
                     );
 
-                put.onsuccess = () => {
-                    resolve(undefined);
-                };
-
-                put.onerror = (e) => {
-                    reject(e);
-                };
+                put.onsuccess = () => resolve(undefined);
+                put.onerror = (e) => reject(e);
             });
         });
     }
 
-    async saveBlobToUserPath(blob: Blob, path: string, targetDB = this.svelteDB!) {
+    async saveBlobToUserPath(blob: Blob, path: string, targetDB = this.db.value!) {
         return await new Promise(async (done, error) => {
             let clonedData: any;
 
             try {
                 const arrayBuffer = await blob.arrayBuffer();
 
-                if (targetDB === this.svelteDB) {
+                if (targetDB === this.db.value) {
                     clonedData = new Blob([arrayBuffer], { type: blob.type });
                 } else {
                     clonedData = new Int8Array(arrayBuffer);
@@ -146,22 +155,19 @@ class IndexedDB {
         });
     }
 
-    checkIfFileExist(path: string, targetDB = this.svelteDB!) {
+    checkIfFileExist(path: string, targetDB = this.db.value!) {
         return new Promise<boolean>((done, error) => {
             const data = targetDB
                 .transaction('FILE_DATA', 'readonly')
                 .objectStore('FILE_DATA')
                 .count(`/userfs/${path}`);
 
-            data.onsuccess = (ev: any) => {
-                done(ev.target.result);
-            };
-
+            data.onsuccess = (ev: any) => done(ev.target.result);
             data.onerror = (e) => error(e);
         });
     }
 
-    GetFileListFromDB(path: string, targetDB = this.svelteDB!) {
+    GetFileListFromDB(path: string, targetDB = this.db.value!) {
         return new Promise<string[]>((done, error) => {
             const data = targetDB
                 .transaction('FILE_DATA', 'readonly')
@@ -183,22 +189,19 @@ class IndexedDB {
         });
     }
 
-    GetFileInfoFromDB(path: string, targetDB = this.svelteDB!) {
+    GetFileInfoFromDB(path: string, targetDB = this.db.value!) {
         return new Promise((done, error) => {
             const data = targetDB
                 .transaction('FILE_DATA', 'readonly')
                 .objectStore('FILE_DATA')
                 .get(`/userfs/${path}`);
 
-            data.onsuccess = (ev: any) => {
-                done(ev.target.result);
-            };
-
+            data.onsuccess = (ev: any) => done(ev.target.result);
             data.onerror = (e) => error(e);
         });
     }
 
-    loadBlobFromUserPath(path: string, mime: string, targetDB = this.svelteDB!) {
+    loadBlobFromUserPath(path: string, mime: string, targetDB = this.db.value!) {
         return new Promise<Blob>((done, error) => {
             const data = targetDB
                 .transaction('FILE_DATA', 'readonly')
@@ -223,7 +226,7 @@ class IndexedDB {
         });
     }
 
-    DownloadFileFromUserPath(path: string, mime: string, filename: string, targetDB = this.svelteDB!) {
+    DownloadFileFromUserPath(path: string, mime: string, filename: string, targetDB = this.db.value!) {
         const data = targetDB
             .transaction('FILE_DATA', 'readonly')
             .objectStore('FILE_DATA')
@@ -235,7 +238,6 @@ class IndexedDB {
             });
 
             const url = URL.createObjectURL(blob);
-
             const link = document.createElement('a');
             link.download = filename;
             link.href = url;
@@ -248,7 +250,7 @@ class IndexedDB {
         };
     }
 
-    removeFileFromUserPath(path: string, targetDB = this.svelteDB!) {
+    removeFileFromUserPath(path: string, targetDB = this.db.value!) {
         return new Promise((done, error) => {
             const data = targetDB
                 .transaction('FILE_DATA', 'readwrite')

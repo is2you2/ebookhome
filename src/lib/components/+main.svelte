@@ -5,7 +5,7 @@
         isReadingMode,
         TransferAct,
         type BookInfo,
-    } from "$lib/services/global";
+    } from "$lib/services/global.svelte";
     import { fade } from "svelte/transition";
 
     type TabType = "myBooks" | "store" | "profile";
@@ -62,20 +62,20 @@
         console.log(`[${book.title}] 책을 3D 리더기로 엽니다.`);
 
         // 1. 전역 상태에 선택한 책 정보를 저장합니다.
-        currentBook.set(book); // 또는 $currentBook = book;
+        currentBook.value = book; // 또는 $currentBook = book;
 
         // 2. 뷰어(읽기 모드)를 활성화합니다.
-        isReadingMode.set(true);
+        isReadingMode.value = true;
     };
 </script>
 
 <div id="canvas-container">
     <!-- 여기에 Viewer의 Three.js 캔버스가 존재함[cite: 2] -->
-    {#if $isReadingMode}
+    {#if isReadingMode.value}
         <button
             class="back-to-ui-btn"
             onclick={() => {
-                isReadingMode.set(false);
+                isReadingMode.value = false;
                 TransferAct["OpenBookList"]?.();
             }}
         >
@@ -84,7 +84,7 @@
     {/if}
 </div>
 
-{#if !$isReadingMode}
+{#if !isReadingMode.value}
     <div class="ui-overlay" transition:fade>
         <main class="dashboard-box">
             <header class="tab-header">

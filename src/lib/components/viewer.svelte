@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { indexed } from "../services/indexed";
 
   import * as THREE from "three";
   import * as ThreeGLTFLoader from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -13,13 +12,14 @@
 
   import JSZip from "jszip";
   import { cubicOut } from "svelte/easing";
+  import { toastManager } from "./toast.svelte";
+  import { fly } from "svelte/transition";
   import {
     currentBook,
     isReadingMode,
     TransferAct,
-  } from "$lib/services/global";
-  import { toastManager } from "./toast.svelte";
-  import { fly } from "svelte/transition";
+  } from "$lib/services/global.svelte";
+  import { indexed } from "$lib/services/indexed.svelte";
 
   interface PageInfo {
     root: any;
@@ -43,9 +43,9 @@
 
   // currentBook의 변화를 감지하여 책을 불러오는 반응형 로직
   $effect(() => {
-    if ($currentBook) {
-      console.log("새로운 책 로드 시작:", $currentBook.title);
-      ClickBookListFromModal($currentBook);
+    if (currentBook.value) {
+      console.log("새로운 책 로드 시작:", currentBook.value.title);
+      ClickBookListFromModal(currentBook.value);
     }
   });
 
@@ -106,7 +106,7 @@
     await ChooseBtn();
     // 2. 읽기 상태 종료 (방법 A 또는 B 선택)
     // [방법 A] currentBook 스토어 초기화 (상위 컴포넌트에서 $effect 등으로 감지 시)
-    currentBook.set(null);
+    currentBook.value = null;
   }
 
   /** 마지막에 본 책 id를 기억해서 로딩 중복을 하지 않음 */
@@ -2019,7 +2019,7 @@
     </button>
   {/if}
 
-  {#if $isReadingMode && isEPubLoaded}
+  {#if isReadingMode.value && isEPubLoaded}
     <div
       class="center_contents button_panel"
       style="pointer-events: auto;"

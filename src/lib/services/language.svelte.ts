@@ -1,20 +1,24 @@
-import { writable, get } from 'svelte/store';
+// src/lib/services/language.svelte.ts
 
 type LangText = Record<string, Record<string, string>>;
-type LangOption = { value: string; display_name?: string };
+export type LangOption = { value: string; display_name?: string };
 
-export const lang = writable<string>('ko');
-export const text = writable<LangText>({
-    Home: {},
-    Main: {},
-    Viewer: {},
-    P5Loading: {},
+// 🌟 { value: _val } 형식의 다국어 반응형 상태
+export const lang = $state<{ value: string }>({ value: 'ko' });
+
+export const text = $state<{ value: LangText }>({
+    value: {
+        Home: {},
+        Main: {},
+        Viewer: {},
+        P5Loading: {},
+    }
 });
 
-export const setable = writable<LangOption[]>([]);
+export const setable = $state<{ value: LangOption[] }>({ value: [] });
 
-/** 외부 콜백 (Angular의 Callback_nakama 대체) */
-export let Callback_nakama: (() => void) | null = null;
+/** 외부 콜백 */
+export const Callback_nakama = $state<{ value: (() => void) | null }>({ value: null });
 
 /**
  * 현재 언어 설정 초기화
@@ -25,15 +29,13 @@ export function initLanguage() {
     const defaultLang = navigator.language.split('-')[0];
     const override = localStorage.getItem('lang');
 
-    lang.set(override || defaultLang);
+    lang.value = override || defaultLang;
 }
 
 /**
  * CSV 로딩 (p5 제거 버전)
  */
-export async function loadSelectedLang(
-    url = '/assets/data/translate.csv'
-) {
+export async function loadSelectedLang(url = '/assets/data/translate.csv') {
     try {
         const res = await fetch(url);
         const csv = await res.text();
@@ -44,30 +46,25 @@ export async function loadSelectedLang(
         // header parsing
         const headers = lines[0].split(',');
 
-        let currentLang = get(lang);
+        let currentLang = lang.value;
         let langIndex = headers.indexOf(currentLang);
 
-        setable.set(
-            headers
-                .filter(h => h !== '#')
-                .map(h => ({ value: h }))
-        );
+        setable.value = headers
+            .filter(h => h !== '#')
+            .map(h => ({ value: h }));
 
         // fallback
         if (langIndex === -1) {
             langIndex = headers.indexOf('ko');
-            lang.set('ko');
+            lang.value = 'ko';
         }
 
         const parsed: LangText = {};
-
         let currentSection = '';
 
         for (let i = 1; i < lines.length; i++) {
             const row = lines[i].split(',');
-
             const key = row[0];
-
             if (!key) continue;
 
             // section marker (#Home, #Main ...)
@@ -82,11 +79,10 @@ export async function loadSelectedLang(
             parsed[currentSection][key] = row[langIndex] ?? '';
         }
 
-        text.set(parsed);
+        text.value = parsed;
+        localStorage.setItem('lang', lang.value);
 
-        localStorage.setItem('lang', get(lang));
-
-        Callback_nakama?.();
+        Callback_nakama.value?.();
     } catch (e) {
         console.error('language load failed:', e);
     }
