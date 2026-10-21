@@ -122,6 +122,55 @@ export async function loginUser(email: string, password: string, serverUrl: stri
     }
 }
 
+// src/lib/services/server.svelte.ts 내 추가 및 수정 부분
+
+export const authToken = $state<{ value: string }>({
+    value: typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') || '' : ''
+});
+
+export function setToken(token: string) {
+    authToken.value = token;
+    if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('auth_token', token);
+    }
+}
+
+export function clearToken() {
+    authToken.value = '';
+    currentUser.value = null;
+    if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('auth_token');
+    }
+}
+
+/**
+ * 내 구매 도서 목록 조회 (IDOR 없는 안전한 API 호출)
+ */
+export async function fetchMyBooks(serverUrl: string = 'http://localhost:3000') {
+    if (!authToken.value) return [];
+
+    try {
+        const res = await fetch(`${serverUrl}/api/users/me/books`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${authToken.value}`
+            }
+        });
+
+        if (!res.ok) {
+            if (res.status === 401 || res.status === 403) {
+                clearToken(); // 토큰 만료 시 자동 로그아웃
+            }
+            return [];
+        }
+
+        return await res.json();
+    } catch (err) {
+        console.error('도서 목록 로드 실패:', err);
+        return [];
+    }
+}
+
 /**
  * 서버로 소셜 로그인 요청
  */

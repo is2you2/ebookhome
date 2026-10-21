@@ -2,8 +2,14 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('node:path');
-const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
+const {
+    hashPassword,
+    verifyPassword,
+    generateToken,
+    authenticateToken,
+    optionalAuthenticateToken
+} = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,7 +18,6 @@ const PORTONE_API_SECRET = process.env.PORTONE_API_SECRET || '';
 app.use(express.json());
 app.use(cors());
 
-// 🌟 실행 파일 위치에 shop.db 생성 유지
 const DB_PATH = path.join(process.cwd(), 'shop.db');
 const db = new DatabaseSync(DB_PATH);
 
@@ -21,13 +26,14 @@ db.exec(`
   PRAGMA foreign_keys = ON;
 `);
 
-// 🌟 기존 회원/통계 테이블 + 결제 및 도서 관리 테이블 생성
+// 회원 테이블 및 결제 테이블 생성
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT UNIQUE,
     password_hash TEXT,
     salt TEXT,
+    is_active INTEGER DEFAULT 1, -- 탈퇴 시 소프트 삭제용
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -37,21 +43,10 @@ db.exec(`
     provider TEXT NOT NULL,
     provider_id TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE RESTRICT,
     UNIQUE(provider, provider_id)
   );
 
-  CREATE TABLE IF NOT EXISTS visitor_stats (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT UNIQUE NOT NULL,
-    referrer TEXT,
-    entry_page TEXT,
-    stay_duration INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  -- [도서 마스터] 가격 위변조 검증의 기준이 되는 테이블
   CREATE TABLE IF NOT EXISTS books (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -63,65 +58,35 @@ db.exec(`
     epub_url TEXT
   );
 
-  -- [결제 영수증] 포트원 거래 내역 기록
+  -- 전자상거래법 준수: 회원 탈퇴 시에도 거래 기록 보존을 위해 ON DELETE RESTRICT 적용
   CREATE TABLE IF NOT EXISTS payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    payment_id TEXT UNIQUE NOT NULL, -- 가맹점 주문 번호
+    payment_id TEXT UNIQUE NOT NULL,
     user_id INTEGER,
     book_id TEXT NOT NULL,
     amount INTEGER NOT NULL,
     currency TEXT DEFAULT 'KRW',
-    status TEXT NOT NULL,           -- PAID, CANCELLED 등
+    status TEXT NOT NULL,
     pay_method TEXT,
     receipt_url TEXT,
-    raw_data TEXT,                   -- 포트원 응답 JSON 원본
+    raw_data TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (book_id) REFERENCES books (id)
+    FOREIGN KEY (book_id) REFERENCES books (id),
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
   );
 
-  -- [소유권] 사용자가 구매한 책 매핑
   CREATE TABLE IF NOT EXISTS user_books (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     book_id TEXT NOT NULL,
     payment_id TEXT,
     purchased_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE RESTRICT,
     FOREIGN KEY (book_id) REFERENCES books (id),
     UNIQUE(user_id, book_id)
   );
 `);
 
-// 🌟 테스트용 기본 도서 데이터 시딩 (DB가 비어있을 때 삽입)
-const bookCount = db.prepare('SELECT COUNT(*) as count FROM books').get().count;
-if (bookCount === 0) {
-    const insertBook = db.prepare(`
-        INSERT INTO books (id, title, author, price, desc, thumbnail, video_thumbnail, epub_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    insertBook.run(
-        'test_book_id_0',
-        '바이블일러스트큐티',
-        '최정훈',
-        10000,
-        '말풍선 글짓기 QT',
-        'assets/books/00/thumbnail.jpg',
-        'assets/books/00/cover.mp4',
-        'assets/books/00/book.epub'
-    );
-    insertBook.run(
-        'store_book_id_0',
-        '새로운 비디오 책 샘플',
-        '작자미상',
-        15000,
-        '영상 표지가 포함된 샘플 전자책',
-        'assets/thumbnail2.jpg',
-        'assets/vid_cover_sample2.mp4',
-        'assets/02.epub'
-    );
-}
-
-// 🌟 트랜잭션 래퍼 도우미 함수
 function runTransaction(callback) {
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -134,45 +99,141 @@ function runTransaction(callback) {
     }
 }
 
-// 비밀번호 암호화 헬퍼 함수
-function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
-    const hash = crypto.scryptSync(password, salt, 64).toString('hex');
-    return { salt, hash };
-}
+// ==========================================
+// [인증] 일반 회원가입 (비동기 scrypt 적용)
+// ==========================================
+app.post('/api/signup', async (req, res) => {
+    const { email, password } = req.body;
 
-function verifyPassword(password, salt, storedHash) {
-    const hash = crypto.scryptSync(password, salt, 64).toString('hex');
-    try {
-        return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(storedHash, 'hex'));
-    } catch {
-        return false;
+    if (!email || !password) {
+        return res.status(400).json({ error: '이메일과 비밀번호를 모두 입력해 주세요.' });
     }
-}
 
-// ==========================================
-// [도서] 전체 도서 목록 조회 API (스토어 탭용)
-// ==========================================
-app.get('/api/books', (req, res) => {
+    // 상업용 필수: 백엔드 비밀번호 정책 검증 (최소 8자 이상)
+    if (password.length < 8) {
+        return res.status(400).json({ error: '비밀번호는 최소 8자 이상이어야 합니다.' });
+    }
+
     try {
-        const books = db.prepare('SELECT * FROM books').all();
-        res.status(200).json(books);
+        const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+        if (existing) {
+            return res.status(409).json({ error: '이미 등록된 이메일 계정입니다.' });
+        }
+
+        // 🌟 비동기 해싱: CPU 부하 작업이 워커 스레드로 넘어가 이벤트 루프를 막지 않음
+        const { salt, hash } = await hashPassword(password);
+
+        const result = db.prepare(`
+            INSERT INTO users (email, password_hash, salt) VALUES (?, ?, ?)
+        `).run(email, hash, salt);
+
+        const userId = Number(result.lastInsertRowid);
+        const token = generateToken({ id: userId, email });
+
+        return res.status(201).json({
+            success: true,
+            token,
+            user: { id: userId, email }
+        });
     } catch (err) {
-        res.status(500).json({ error: '도서 목록 조회 오류' });
+        console.error('회원가입 오류:', err);
+        return res.status(500).json({ error: '서버 내부 오류' });
     }
 });
 
 // ==========================================
-// [도서] 사용자별 구매 도서 목록 조회 API (내 서재 탭용)
+// [인증] 일반 로그인 (비동기 scrypt 검증 및 JWT 발급)
 // ==========================================
-app.get('/api/users/:userId/books', (req, res) => {
-    const { userId } = req.params;
+app.post('/api/login', async (req, res) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).json({ error: '이메일과 비밀번호를 입력해 주세요.' });
+    }
+
     try {
+        const user = db.prepare('SELECT * FROM users WHERE email = ? AND is_active = 1').get(email);
+        if (!user || !user.password_hash || !user.salt) {
+            return res.status(401).json({ error: '이메일 또는 비밀번호가 일치하지 않습니다.' });
+        }
+
+        // 🌟 비동기 비밀번호 검증
+        const isValid = await verifyPassword(password, user.salt, user.password_hash);
+        if (!isValid) {
+            return res.status(401).json({ error: '이메일 또는 비밀번호가 일치하지 않습니다.' });
+        }
+
+        // 인증 토큰 발급
+        const token = generateToken({ id: user.id, email: user.email });
+
+        return res.status(200).json({
+            success: true,
+            token,
+            user: { id: user.id, email: user.email }
+        });
+    } catch (err) {
+        console.error('로그인 오류:', err);
+        return res.status(500).json({ error: '로그인 처리 중 오류 발생' });
+    }
+});
+
+// ==========================================
+// [인증] 카카오 소셜 로그인 연동
+// ==========================================
+app.post('/api/auth/social', (req, res) => {
+    const { provider, providerId, email } = req.body;
+    if (!provider || !providerId) {
+        return res.status(400).json({ error: '소셜 인증 정보가 누락되었습니다.' });
+    }
+
+    try {
+        let userId;
+        const socialAccount = db.prepare(`
+            SELECT user_id FROM social_accounts WHERE provider = ? AND provider_id = ?
+        `).get(provider, providerId);
+
+        if (socialAccount) {
+            userId = socialAccount.user_id;
+        } else {
+            runTransaction(() => {
+                let userRecord = email ? db.prepare('SELECT id FROM users WHERE email = ?').get(email) : null;
+                if (!userRecord) {
+                    const result = db.prepare('INSERT INTO users (email) VALUES (?)').run(email || null);
+                    userId = Number(result.lastInsertRowid);
+                } else {
+                    userId = userRecord.id;
+                }
+                db.prepare(`
+                    INSERT INTO social_accounts (user_id, provider, provider_id) VALUES (?, ?, ?)
+                `).run(userId, provider, providerId);
+            });
+        }
+
+        const token = generateToken({ id: userId, email: email || null });
+        return res.status(200).json({
+            success: true,
+            token,
+            user: { id: userId, email: email || null }
+        });
+    } catch (err) {
+        console.error('소셜 인증 오류:', err);
+        return res.status(500).json({ error: '소셜 로그인 처리 실패' });
+    }
+});
+
+// ==========================================
+// 🌟 [보안 개선] 내 구매 도서 조회 (IDOR 방어)
+// ==========================================
+// 기존 /api/users/:userId/books 에서 URL 파라미터를 없애고 토큰 기반(/api/users/me/books)으로 전환
+app.get('/api/users/me/books', authenticateToken, (req, res) => {
+    try {
+        // req.user.id는 authenticateToken 미들웨어에서 서명 검증을 통과한 유저 ID임이 보장됨
         const myBooks = db.prepare(`
             SELECT b.*, ub.purchased_at 
             FROM books b
             INNER JOIN user_books ub ON b.id = ub.book_id
             WHERE ub.user_id = ?
-        `).all(userId);
+        `).all(req.user.id);
 
         res.status(200).json(myBooks);
     } catch (err) {
@@ -181,23 +242,24 @@ app.get('/api/users/:userId/books', (req, res) => {
 });
 
 // ==========================================
-// 🌟 [결제] 포트원 V2 결제 검증 및 도서 권한 부여 API
+// 🌟 [보안 개선] 포트원 V2 결제 검증 API
 // ==========================================
-app.post('/api/payments/complete', async (req, res) => {
-    const { paymentId, bookId, userId } = req.body;
+app.post('/api/payments/complete', optionalAuthenticateToken, async (req, res) => {
+    const { paymentId, bookId } = req.body;
+    // 클라이언트가 보낸 userId 파라미터를 신뢰하지 않고, 토큰이 있으면 req.user.id를 사용
+    const verifiedUserId = req.user ? req.user.id : null;
 
     if (!paymentId || !bookId) {
-        return res.status(400).json({ error: '결제 정보(paymentId, bookId)가 누락되었습니다.' });
+        return res.status(400).json({ error: '결제 식별자(paymentId)와 도서 ID(bookId)가 필요합니다.' });
     }
 
     try {
-        // 1. 서버 DB에서 해당 도서의 실제 가격 확인
         const book = db.prepare('SELECT * FROM books WHERE id = ?').get(bookId);
         if (!book) {
             return res.status(404).json({ error: '존재하지 않는 도서입니다.' });
         }
 
-        // 2. 포트원 V2 REST API 단건 조회 호출 (Node 내장 fetch 사용)
+        // 포트원 V2 REST API 단건 조회
         const portoneRes = await fetch(`https://api.portone.io/payments/${encodeURIComponent(paymentId)}`, {
             method: 'GET',
             headers: {
@@ -208,33 +270,30 @@ app.post('/api/payments/complete', async (req, res) => {
 
         if (!portoneRes.ok) {
             const errData = await portoneRes.json();
-            return res.status(400).json({ error: errData.message || '포트원 결제 내역 조회 실패' });
+            return res.status(400).json({ error: errData.message || '결제 내역 조회 실패' });
         }
 
         const paymentData = await portoneRes.json();
 
-        // 3. 결제 상태 검증
         if (paymentData.status !== 'PAID') {
-            return res.status(400).json({ error: `결제가 완료되지 않았습니다. (현재 상태: ${paymentData.status})` });
+            return res.status(400).json({ error: `결제 미완료 상태: ${paymentData.status}` });
         }
 
-        // 4. [핵심] 금액 위변조 검증 (포트원에서 실제로 결제된 금액 == DB의 책 정가)
+        // 금액 위변조 검증
         const actualPaidAmount = paymentData.amount?.total;
         if (actualPaidAmount !== book.price) {
             return res.status(400).json({
-                error: `결제 금액 위변조 감지: 실 결제액(${actualPaidAmount}원) != 도서 정가(${book.price}원)`
+                error: `금액 위변조 감지: 실 결제액(${actualPaidAmount}원) != DB 정가(${book.price}원)`
             });
         }
 
-        // 5. 결제 영수증 저장 및 사용자 소유권 부여 (트랜잭션)
         runTransaction(() => {
-            // 영수증 삽입
             db.prepare(`
                 INSERT INTO payments (payment_id, user_id, book_id, amount, currency, status, pay_method, receipt_url, raw_data)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
                 paymentId,
-                userId || null,
+                verifiedUserId,
                 bookId,
                 actualPaidAmount,
                 paymentData.currency || 'KRW',
@@ -244,125 +303,22 @@ app.post('/api/payments/complete', async (req, res) => {
                 JSON.stringify(paymentData)
             );
 
-            // 로그인 사용자인 경우 내 서재(user_books)에 등록
-            if (userId) {
+            if (verifiedUserId) {
                 db.prepare(`
                     INSERT OR IGNORE INTO user_books (user_id, book_id, payment_id)
                     VALUES (?, ?, ?)
-                `).run(userId, bookId, paymentId);
+                `).run(verifiedUserId, bookId, paymentId);
             }
         });
 
         return res.status(200).json({
             success: true,
-            message: '결제 검증 및 도서 구매가 완료되었습니다.',
-            book: book
+            message: '결제 검증 및 도서 등록 완료',
+            book
         });
-
     } catch (err) {
         console.error('결제 검증 오류:', err);
-        return res.status(500).json({ error: '서버 내부 결제 처리 오류가 발생했습니다.' });
-    }
-});
-
-// ==========================================
-// [인증] 일반 회원가입 API
-// ==========================================
-app.post('/api/signup', (req, res) => {
-    const { email, password } = req.body;
-
-    if (!email || !password || password.length < 6) {
-        return res.status(400).json({ error: '유효한 이메일과 6자리 이상의 비밀번호를 입력해주세요.' });
-    }
-
-    try {
-        const { salt, hash } = hashPassword(password);
-
-        // 1. 해당 이메일로 가입된 유저가 있는지 확인
-        const existingUser = db.prepare('SELECT id, password_hash FROM users WHERE email = ?').get(email);
-
-        if (existingUser) {
-            if (existingUser.password_hash) {
-                return res.status(409).json({ error: '이미 가입된 이메일입니다.' });
-            }
-
-            // 소셜 가입자에게 비밀번호 설정 (계정 통합)
-            db.prepare('UPDATE users SET password_hash = ?, salt = ? WHERE email = ?')
-                .run(hash, salt, email);
-
-            return res.status(200).json({
-                message: '기존 소셜 계정에 비밀번호 로그인이 성공적으로 연동되었습니다.',
-                userId: existingUser.id
-            });
-        }
-
-        // 완전 신규 가입
-        const insertStmt = db.prepare('INSERT INTO users (email, password_hash, salt) VALUES (?, ?, ?)');
-        const info = insertStmt.run(email, hash, salt);
-
-        return res.status(201).json({
-            message: '회원가입이 완료되었습니다.',
-            userId: Number(info.lastInsertRowid)
-        });
-
-    } catch (err) {
-        console.error('일반 회원가입 오류:', err);
-        res.status(500).json({ error: '서버 내부 오류' });
-    }
-});
-
-// ==========================================
-// [인증] 소셜 로그인 API
-// ==========================================
-app.post('/api/auth/social', (req, res) => {
-    const { provider, providerId, email } = req.body;
-
-    if (!provider || !providerId) {
-        return res.status(400).json({ error: '소셜 인증 정보가 부족합니다.' });
-    }
-
-    try {
-        // 이미 연동된 소셜 계정인지 조회
-        const existingSocial = db.prepare(`
-            SELECT user_id FROM social_accounts WHERE provider = ? AND provider_id = ?
-        `).get(provider, providerId);
-
-        if (existingSocial) {
-            return res.status(200).json({ message: '로그인 성공', userId: existingSocial.user_id });
-        }
-
-        // 트랜잭션을 통한 신규 생성 및 계정 통합
-        const newUserId = runTransaction(() => {
-            let targetUserId;
-
-            if (email) {
-                const userByEmail = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-                if (userByEmail) {
-                    targetUserId = userByEmail.id;
-                }
-            }
-
-            if (!targetUserId) {
-                const userStmt = db.prepare('INSERT INTO users (email) VALUES (?)');
-                const userInfo = userStmt.run(email || null);
-                targetUserId = Number(userInfo.lastInsertRowid);
-            }
-
-            db.prepare(`
-                INSERT INTO social_accounts (user_id, provider, provider_id) VALUES (?, ?, ?)
-            `).run(targetUserId, provider, providerId);
-
-            return targetUserId;
-        });
-
-        return res.status(201).json({
-            message: '소셜 계정 연동 및 로그인 완료',
-            userId: newUserId
-        });
-
-    } catch (err) {
-        console.error('소셜 로그인 오류:', err);
-        res.status(500).json({ error: '서버 내부 오류' });
+        return res.status(500).json({ error: '서버 결제 검증 중 오류 발생' });
     }
 });
 
@@ -406,45 +362,6 @@ app.post('/api/analytics/duration', (req, res) => {
     }
 });
 
-// ==========================================
-// [인증] 일반(이메일) 로그인 API
-// ==========================================
-app.post('/api/login', (req, res) => {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-        return res.status(400).json({ error: '이메일과 비밀번호를 모두 입력해주세요.' });
-    }
-
-    try {
-        const user = db.prepare('SELECT id, password_hash, salt FROM users WHERE email = ?').get(email);
-
-        if (!user) {
-            return res.status(401).json({ error: '이메일 또는 비밀번호가 일치하지 않습니다.' });
-        }
-
-        if (!user.password_hash || !user.salt) {
-            return res.status(401).json({
-                error: '카카오 등 소셜 계정으로 가입된 이메일입니다. 소셜 로그인을 이용해주세요.'
-            });
-        }
-
-        const isValid = verifyPassword(password, user.salt, user.password_hash);
-        if (!isValid) {
-            return res.status(401).json({ error: '이메일 또는 비밀번호가 일치하지 않습니다.' });
-        }
-
-        return res.status(200).json({
-            message: '로그인에 성공했습니다.',
-            userId: user.id
-        });
-
-    } catch (err) {
-        console.error('로그인 오류:', err);
-        return res.status(500).json({ error: '서버 내부 오류가 발생했습니다.' });
-    }
-});
-
 app.listen(PORT, () => {
-    console.log(`🚀 서버가 포트 ${PORT}에서 실행 중입니다. (DB: ${DB_PATH})`);
+    console.log(`🚀 서버 구동 완료: 포트 ${PORT} (DB: ${DB_PATH})`);
 });
