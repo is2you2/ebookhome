@@ -1,5 +1,4 @@
 <script lang="ts">
-  import Login from "$lib/components/+login.svelte";
   import Main from "$lib/components/+main.svelte";
   import Toast from "$lib/components/+toast.svelte";
   import Viewer from "$lib/components/viewer.svelte";
@@ -29,11 +28,7 @@
   <Viewer />
 </div>
 
-{#if status.value == "login"}
-  <div transition:fade>
-    <Login />
-  </div>
-{:else if status.value == "main"}
+{#if status.value === "main"}
   <div transition:fade>
     <Main />
   </div>

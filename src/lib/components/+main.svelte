@@ -6,16 +6,17 @@
         TransferAct,
         type BookInfo,
     } from "$lib/services/global.svelte";
+    import { currentUser } from "$lib/services/server.svelte";
+    import Login from "./+login.svelte";
     import { fade } from "svelte/transition";
 
     type TabType = "myBooks" | "store" | "profile";
-
+    // 🌟 시작 시 '전체 도서' 탭이 기본 열림
     let activeTab = $state<TabType>("store");
 
     type ModalType = "business" | "terms" | "privacy" | "license" | null;
     let openModal = $state<ModalType>(null);
 
-    // 실제 정보를 기반으로 한 샘플 데이터 구성
     let BookList = $state<BookInfo[]>([
         {
             id: "test_book_id_0",
@@ -34,7 +35,7 @@
             title: "기독교의 기본 진리",
             desc: "신앙의 기초를 다지는 책",
             thumbnail:
-                "https://via.placeholder.com/300x450/222/fff?text=Book+Cover", // 일반 이미지 표지
+                "https://via.placeholder.com/300x450/222/fff?text=Book+Cover",
             epub_url: "assets/books/01/book.epub",
             purchase_time: Date.now() - 86400000,
             author: "존 스토트",
@@ -43,7 +44,6 @@
         },
     ]);
 
-    // 스토어 탭을 위한 더미 도서
     let StoreList = $state<BookInfo[]>([
         {
             id: "store_book_id_0",
@@ -57,20 +57,14 @@
         },
     ]);
 
-    // 🌟 책 읽기 실행 시 currentBook 상태 업데이트
     const readBook = (book: BookInfo) => {
         console.log(`[${book.title}] 책을 3D 리더기로 엽니다.`);
-
-        // 1. 전역 상태에 선택한 책 정보를 저장합니다.
-        currentBook.value = book; // 또는 $currentBook = book;
-
-        // 2. 뷰어(읽기 모드)를 활성화합니다.
+        currentBook.value = book;
         isReadingMode.value = true;
     };
 </script>
 
 <div id="canvas-container">
-    <!-- 여기에 Viewer의 Three.js 캔버스가 존재함[cite: 2] -->
     {#if isReadingMode.value}
         <button
             class="back-to-ui-btn"
@@ -105,49 +99,58 @@
             <section class="tab-content">
                 <!-- [탭 1] 내 서재 -->
                 {#if activeTab === "myBooks"}
-                    <div class="content-header">
-                        <h2>읽고 있는 책</h2>
-                        <div class="search-bar">
-                            <input type="text" placeholder="내 서재 검색..." />
-                        </div>
-                    </div>
-                    <div class="book-grid">
-                        {#each BookList as book}
-                            <!-- svelte-ignore a11y_click_events_have_key_events -->
-                            <!-- svelte-ignore a11y_no_static_element_interactions -->
-                            <div
-                                class="book-card"
-                                onclick={() => readBook(book)}
-                            >
-                                <div class="book-cover">
-                                    <!-- 🌟 비디오 표지가 있으면 자동 재생 비디오 출력, 없으면 이미지 출력 -->
-                                    {#if book.video_thumbnail}
-                                        <!-- 비디오 자동 재생 속성(autoplay, loop, muted, playsinline) 필수 -->
-                                        <video
-                                            src={book.video_thumbnail}
-                                            autoplay
-                                            loop
-                                            muted
-                                            playsinline
-                                            class="cover-media"
-                                        ></video>
-                                    {:else}
-                                        <img
-                                            src={book.thumbnail}
-                                            alt={book.title}
-                                            class="cover-media"
-                                        />
-                                    {/if}
-                                </div>
-                                <div class="book-info">
-                                    <h3>{book.title}</h3>
-                                    <p>읽음 {book.progress || 0}%</p>
-                                </div>
+                    {#if !currentUser.value}
+                        <!-- 🌟 미로그인 시 탭 안에 자연스럽게 배치되는 로그인 카드 -->
+                        <Login
+                            title="내 서재"
+                            description="구매한 책을 확인하고 이어서 읽으려면 로그인해 주세요."
+                        />
+                    {:else}
+                        <div class="content-header">
+                            <h2>읽고 있는 책</h2>
+                            <div class="search-bar">
+                                <input
+                                    type="text"
+                                    placeholder="내 서재 검색..."
+                                />
                             </div>
-                        {/each}
-                    </div>
+                        </div>
+                        <div class="book-grid">
+                            {#each BookList as book}
+                                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                                <div
+                                    class="book-card"
+                                    onclick={() => readBook(book)}
+                                >
+                                    <div class="book-cover">
+                                        {#if book.video_thumbnail}
+                                            <video
+                                                src={book.video_thumbnail}
+                                                autoplay
+                                                loop
+                                                muted
+                                                playsinline
+                                                class="cover-media"
+                                            ></video>
+                                        {:else}
+                                            <img
+                                                src={book.thumbnail}
+                                                alt={book.title}
+                                                class="cover-media"
+                                            />
+                                        {/if}
+                                    </div>
+                                    <div class="book-info">
+                                        <h3>{book.title}</h3>
+                                        <p>읽음 {book.progress || 0}%</p>
+                                    </div>
+                                </div>
+                            {/each}
+                        </div>
+                    {/if}
 
-                    <!-- [탭 2] 스토어 -->
+                    <!-- [탭 2] 전체 도서 (로그인 없이 항상 둘러보기 가능) -->
                 {:else if activeTab === "store"}
                     <div class="content-header">
                         <h2>새로운 도서 탐색</h2>
@@ -191,76 +194,92 @@
 
                     <!-- [탭 3] 내 정보 -->
                 {:else if activeTab === "profile"}
-                    <div class="profile-container">
-                        <div class="profile-header">
-                            <div class="avatar"></div>
-                            <div class="user-info">
-                                <h2>user@email.com</h2>
-                                <p>카카오 계정 연동됨</p>
+                    {#if !currentUser.value}
+                        <!-- 🌟 미로그인 시 탭 안에 자연스럽게 배치되는 로그인 카드 -->
+                        <Login
+                            title="계정 정보"
+                            description="계정 설정 및 구매 내역을 관리하려면 로그인해 주세요."
+                        />
+                    {:else}
+                        <div class="profile-container">
+                            <div class="profile-header">
+                                <div class="avatar"></div>
+                                <div class="user-info">
+                                    <h2>
+                                        {currentUser.value.email ||
+                                            "user@email.com"}
+                                    </h2>
+                                    <p>인증된 계정</p>
+                                </div>
+                            </div>
+
+                            <h3 class="section-title">계정 설정</h3>
+                            <ul class="settings-list">
+                                <li>
+                                    <span>계정 연동 관리</span>
+                                    <button class="action-btn">관리</button>
+                                </li>
+                                <li>
+                                    <span>비밀번호 변경</span>
+                                    <button class="action-btn">변경</button>
+                                </li>
+                            </ul>
+
+                            <h3 class="section-title">앱 정보</h3>
+                            <ul class="settings-list legal-list">
+                                <li>
+                                    <span>사업자 정보</span>
+                                    <button
+                                        class="text-btn"
+                                        onclick={() => (openModal = "business")}
+                                        >보기</button
+                                    >
+                                </li>
+                                <li>
+                                    <span>이용약관 및 정책</span>
+                                    <button
+                                        class="text-btn"
+                                        onclick={() => (openModal = "terms")}
+                                        >보기</button
+                                    >
+                                </li>
+                                <li>
+                                    <span>개인정보처리방침</span>
+                                    <button
+                                        class="text-btn"
+                                        onclick={() => (openModal = "privacy")}
+                                        >보기</button
+                                    >
+                                </li>
+                                <li>
+                                    <span>오픈소스 라이선스</span>
+                                    <button
+                                        class="text-btn"
+                                        onclick={() => (openModal = "license")}
+                                        >보기</button
+                                    >
+                                </li>
+                            </ul>
+
+                            <div class="danger-zone">
+                                <button
+                                    class="logout-btn"
+                                    onclick={() => {
+                                        currentUser.value = null;
+                                    }}
+                                >
+                                    로그아웃
+                                </button>
+                                <button class="delete-account-btn"
+                                    >회원 탈퇴</button
+                                >
                             </div>
                         </div>
-
-                        <!-- 계정 설정 영역 -->
-                        <h3 class="section-title">계정 설정</h3>
-                        <ul class="settings-list">
-                            <li>
-                                <span>계정 연동 관리</span>
-                                <button class="action-btn">관리</button>
-                            </li>
-                            <li>
-                                <span>비밀번호 변경</span>
-                                <button class="action-btn">변경</button>
-                            </li>
-                        </ul>
-
-                        <!-- 🌟 앱 정보 및 법적 고지 영역 -->
-                        <h3 class="section-title">앱 정보</h3>
-                        <ul class="settings-list legal-list">
-                            <li>
-                                <span>사업자 정보</span>
-                                <button
-                                    class="text-btn"
-                                    onclick={() => (openModal = "business")}
-                                    >보기</button
-                                >
-                            </li>
-                            <li>
-                                <span>이용약관 및 정책</span>
-                                <button
-                                    class="text-btn"
-                                    onclick={() => (openModal = "terms")}
-                                    >보기</button
-                                >
-                            </li>
-                            <li>
-                                <span>개인정보처리방침</span>
-                                <button
-                                    class="text-btn"
-                                    onclick={() => (openModal = "privacy")}
-                                    >보기</button
-                                >
-                            </li>
-                            <li>
-                                <span>오픈소스 라이선스</span>
-                                <button
-                                    class="text-btn"
-                                    onclick={() => (openModal = "license")}
-                                    >보기</button
-                                >
-                            </li>
-                        </ul>
-
-                        <!-- 위험 영역 -->
-                        <div class="danger-zone">
-                            <button class="logout-btn">로그아웃</button>
-                            <button class="delete-account-btn">회원 탈퇴</button
-                            >
-                        </div>
-                    </div>
+                    {/if}
                 {/if}
             </section>
 
-            <!-- 🌟 법적 정보 모달 (팝업) 레이어 -->
+            <!-- 법적 정보 모달 레이어 -->
             {#if openModal !== null}
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -269,9 +288,6 @@
                     transition:fade
                     onclick={() => (openModal = null)}
                 >
-                    <!-- 모달 내부를 클릭해도 닫히지 않도록 이벤트 전파 차단 -->
-                    <!-- svelte-ignore a11y_click_events_have_key_events -->
-                    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                     <article
                         class="modal-box"
                         onclick={(e) => e.stopPropagation()}
@@ -310,7 +326,7 @@
                                 <ul>
                                     <li>Svelte (MIT License)</li>
                                     <li>Three.js (MIT License)</li>
-                                    <li>better-sqlite3 (MIT License)</li>
+                                    <li>node:sqlite (Node.js Native)</li>
                                 </ul>
                             {:else}
                                 <p>제 1조 (목적)...</p>
@@ -324,6 +340,7 @@
 {/if}
 
 <style>
+    /* 기존 스타일 그대로 유지 */
     :global(body),
     :global(html) {
         margin: 0;
@@ -381,7 +398,6 @@
         padding: 20px;
     }
 
-    /* 대시보드는 로그인 박스보다 훨씬 넓게 설정 */
     .dashboard-box {
         width: 100%;
         max-width: 900px;
@@ -397,7 +413,6 @@
         overflow: hidden;
     }
 
-    /* 탭 헤더 */
     .tab-header {
         display: flex;
         background: rgba(0, 0, 0, 0.2);
@@ -424,7 +439,6 @@
         background: rgba(255, 255, 255, 0.05);
     }
 
-    /* 콘텐츠 영역 */
     .tab-content {
         flex: 1;
         padding: 30px;
@@ -453,7 +467,6 @@
         border-color: rgba(255, 255, 255, 0.5);
     }
 
-    /* 책 그리드 레이아웃 */
     .book-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
@@ -483,14 +496,14 @@
         justify-content: center;
         align-items: center;
         margin-bottom: 12px;
-        overflow: hidden; /* 모서리 둥글게 잘리도록 오버플로우 숨김 */
+        overflow: hidden;
         position: relative;
     }
 
     .cover-media {
         width: 100%;
         height: 100%;
-        object-fit: cover; /* 비율을 유지하며 꽉 차게 렌더링 */
+        object-fit: cover;
         display: block;
     }
 
@@ -507,7 +520,6 @@
         margin: 0;
     }
 
-    /* 스토어 카드 전용 구매 버튼 */
     .buy-btn {
         width: 100%;
         padding: 8px;
@@ -524,7 +536,6 @@
         background: #e0e0e0;
     }
 
-    /* 내 정보(Profile) 탭 스타일 */
     .profile-container {
         max-width: 600px;
         margin: 0 auto;
@@ -606,7 +617,6 @@
         background: rgba(255, 59, 48, 0.2);
     }
 
-    /* 내 정보 탭의 섹션 타이틀 */
     .section-title {
         font-size: 14px;
         color: rgba(255, 255, 255, 0.5);
@@ -630,7 +640,6 @@
         text-decoration: underline;
     }
 
-    /* 🌟 모달(Modal) 백드롭 및 박스 스타일 */
     .modal-backdrop {
         position: fixed;
         top: 0;
@@ -641,9 +650,8 @@
         display: flex;
         justify-content: center;
         align-items: center;
-        /* 모달이 뜰 때 배경을 더 흐리게 */
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
     }
 
     .modal-box {

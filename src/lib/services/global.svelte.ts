@@ -19,7 +19,7 @@ export interface BookInfo {
 export type AppStatus = 'init' | 'login' | 'main';
 
 // 🌟 앱 화면 진입 상태 (초기값: 'main')
-export const status = $state<{ value: AppStatus }>({ value: 'main' });
+export const status = $state<{ value: AppStatus }>({ value: 'init' });
 
 // 🌟 3D 뷰어 읽기 모드 활성화 여부
 export const isReadingMode = $state<{ value: boolean }>({ value: false });
