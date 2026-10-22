@@ -108,24 +108,38 @@
 
   let LastViewedBookId = $state("");
 
+  // src/lib/components/viewer.svelte 내 수정
+
+  /** 모달에서 책 정보를 클릭함 (비동기 순서 완벽 보장) */
   async function ClickBookListFromModal(info: BookInfo) {
     if (LastViewedBookId == info.id) return;
     LastViewedBookId = info.id;
     CurrentBookInfo = info;
 
-    playAnimation(EmptyPageObj, "BookShow", {
-      reverse: true,
-      onFinished: () => {
-        isCoverAnimPlaying = true;
-        disposeObject3D(EmptyPageObj, { keepRoot: true });
-        const willRemove = threeContext.scene?.getObjectByName("book_model");
-        disposeObject3D(willRemove);
+    // 🌟 1. 기존에 열려 있는 책이 있을 때만 닫기 애니메이션을 수행하고, '반드시' 완료를 대기
+    if (AllPages.length > 0) {
+      await playAnimation(EmptyPageObj, "BookShow", {
+        reverse: true,
+        onFinished: () => {
+          isCoverAnimPlaying = true;
+          disposeObject3D(EmptyPageObj, { keepRoot: true });
+          const willRemove = threeContext.scene?.getObjectByName("book_model");
+          disposeObject3D(willRemove);
+          const book_model = threeContext.book_model.scene.clone();
+          book_model.name = "book_model";
+          threeContext.scene.add(book_model);
+        },
+      });
+    } else {
+      // 🌟 최초 열람 시: 씬에 기본 book_model이 없다면 즉시 준비
+      if (threeContext && !threeContext.scene?.getObjectByName("book_model")) {
         const book_model = threeContext.book_model.scene.clone();
         book_model.name = "book_model";
         threeContext.scene.add(book_model);
-      },
-    });
+      }
+    }
 
+    // 🌟 2. 이전 책 정리가 완전히 끝난 후 안전하게 새 책 로드
     clearHighResCache();
     await LoadEpubSecurely(info);
   }
@@ -422,6 +436,7 @@
     VideoTexture?.dispose();
   }
 
+  /** 애니메이션 재생 헬퍼 (클립 누락 시 무한 대기 방어) */
   async function playAnimation(
     target: THREE.Object3D,
     clipName: string,
@@ -437,14 +452,17 @@
     if (!ctx) return null;
 
     const clip = THREE.AnimationClip.findByName(ctx.env.animations, clipName);
-    const mixer = new THREE.AnimationMixer(target);
-    const action = mixer.clipAction(clip, target);
 
-    await new Promise((done: any) => {
+    return await new Promise((done: any) => {
+      // 클립이 없으면 즉시 종료하여 Promise 멈춤 방어
       if (!clip) {
-        console.log("애니메이션 클립 누락:", clipName);
-        return null;
+        console.warn("애니메이션 클립 누락:", clipName);
+        options?.onFinished?.();
+        return done(null);
       }
+
+      const mixer = new THREE.AnimationMixer(target);
+      const action = mixer.clipAction(clip, target);
 
       const {
         loop = THREE.LoopOnce,
@@ -466,13 +484,11 @@
         mixers = mixers.filter((m) => m !== mixer);
         mixer.removeEventListener("finished", finishedHandler);
         onFinished?.();
-        done();
+        done({ mixer, action, clip });
       };
 
       mixer.addEventListener("finished", finishedHandler);
     });
-
-    return { mixer, action, clip };
   }
 
   let pageAnimationMap = new Map<
