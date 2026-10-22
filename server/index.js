@@ -58,6 +58,16 @@ db.exec(`
     epub_url TEXT
   );
 
+    CREATE TABLE IF NOT EXISTS visitor_stats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT UNIQUE NOT NULL,
+    referrer TEXT,
+    entry_page TEXT,
+    stay_duration INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- 전자상거래법 준수: 회원 탈퇴 시에도 거래 기록 보존을 위해 ON DELETE RESTRICT 적용
   CREATE TABLE IF NOT EXISTS payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

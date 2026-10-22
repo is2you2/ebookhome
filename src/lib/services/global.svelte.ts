@@ -1,4 +1,4 @@
-// src/lib/services/global.svelte.ts
+export const isPreviewMode = $state<{ value: boolean }>({ value: false });
 
 export interface BookInfo {
     id: string;
@@ -29,7 +29,7 @@ export const status = $state<{ value: AppStatus }>({ value: 'init' });
 export const isReadingMode = $state<{ value: boolean }>({ value: false });
 
 // 🌟 현재 뷰어에서 읽기 위해 선택된 책 정보
-export const currentBook = $state<{ value: BookInfo | null }>({ value: null });
+export const currentBook = $state<{ value: any }>({ value: null });
 
 /** 
  * 컴포넌트간 행동 공유용 객체 [key] = function

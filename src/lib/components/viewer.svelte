@@ -1,3 +1,4 @@
+<!-- src/lib/components/viewer.svelte -->
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
 
@@ -13,10 +14,11 @@
   import JSZip from "jszip";
   import { cubicOut } from "svelte/easing";
   import { toastManager } from "./toast.svelte";
-  import { fly } from "svelte/transition";
+  import { fly, fade, scale } from "svelte/transition";
   import {
     currentBook,
     isReadingMode,
+    isPreviewMode,
     TransferAct,
   } from "$lib/services/global.svelte";
   import { indexed } from "$lib/services/indexed.svelte";
@@ -39,13 +41,18 @@
     author: string;
     user_read?: number;
     progress?: number;
+    price?: number;
   }
 
-  // currentBook의 변화를 감지하여 책을 불러오는 반응형 로직
+  // 🌟 5페이지 초과 시도 시 표출할 구매 유도 안내 모달 상태
+  let showBuyGuideModal = $state(false);
+
+  // 🌟 currentBook.value만 단독 추적하여 나가기/상태 변경 시의 원치 않는 재호출 차단
   $effect(() => {
-    if (currentBook.value) {
-      console.log("새로운 책 로드 시작:", currentBook.value.title);
-      ClickBookListFromModal(currentBook.value);
+    const book = currentBook.value;
+    if (book) {
+      showBuyGuideModal = false;
+      ClickBookListFromModal(book);
     }
   });
 
@@ -102,43 +109,37 @@
 
   /** 책 목록 가져오기 (Modal) */
   async function OpenBookList() {
-    // 버튼을 누르면 책을 단상 위에 다시 올려둠
+    showBuyGuideModal = false;
     await ChooseBtn();
-    // 2. 읽기 상태 종료 (방법 A 또는 B 선택)
-    // [방법 A] currentBook 스토어 초기화 (상위 컴포넌트에서 $effect 등으로 감지 시)
     currentBook.value = null;
   }
 
-  /** 마지막에 본 책 id를 기억해서 로딩 중복을 하지 않음 */
+  /** 마지막에 본 책 id를 기억해서 로딩 중복을 하지 않음 (기존 로직 엄격 유지) */
   let LastViewedBookId = $state("");
+
   /** 모달에서 책 정보를 클릭함 */
   async function ClickBookListFromModal(info: BookInfo) {
-    // 모달은 닫기
     if (LastViewedBookId == info.id) return;
+    LastViewedBookId = info.id;
     CurrentBookInfo = info;
-    // 이미 존재하는 책이 있다면 빼내기 애니메이션
+
     playAnimation(EmptyPageObj, "BookShow", {
       reverse: true,
       onFinished: () => {
         isCoverAnimPlaying = true;
-        // 책 정보를 삭제
         disposeObject3D(EmptyPageObj, { keepRoot: true });
         const willRemove = threeContext.scene?.getObjectByName("book_model");
         disposeObject3D(willRemove);
-        // 필요한 개체 재생성
         const book_model = threeContext.book_model.scene.clone();
         book_model.name = "book_model";
         threeContext.scene.add(book_model);
       },
     });
-    // 새 책을 고르면 기존 책 정보 제거
     await ClearIndexedDB();
-    // 선택한 책 불러오기
     LoadEpubFromURL(info);
   }
-  /** threejs 환경을 생성함
-   * 생성하는 과정에서 미리 준비된 가상 책 전시 환경을 가져옴
-   */
+
+  /** threejs 환경을 생성함 */
   async function initThreeWithGLB(container: HTMLDivElement) {
     if (threeContext) return threeContext;
 
@@ -153,34 +154,23 @@
     container.appendChild(renderer.domElement);
 
     const loader = new ThreeGLTFLoader.GLTFLoader();
-    // 주소로부터 파일 가져오기
-    /** 애니메이션이 포함된 환경 3d 모델 */
     const glbURL = "assets/model/env.glb";
-    /** 페이지 구성 좌표계 모델 */
     const book = "assets/model/book.glb";
     const env = await loader.loadAsync(glbURL);
     const book_model = await loader.loadAsync(book);
 
-    // const ambient = new THREE.AmbientLight(0xffffff, 0.3);
-    // scene.add(ambient);
-
-    // 🔥 GLB 전체 씬 추가
     scene.add(env.scene);
 
-    // 🎯 카메라 가져오기
     let camera = null;
-
     if (env.cameras && env.cameras.length > 0) {
       camera = env.cameras[0];
     } else {
-      // fallback
       camera = new THREE.PerspectiveCamera(
         75,
         container.clientWidth / container.clientHeight,
         0.1,
         1000,
       );
-
       camera.position.set(0, 1, 5);
       scene.add(camera);
 
@@ -201,72 +191,47 @@
     const fitCameraToObject = (camera: any, object: any, offset = 1.1) => {
       if (boundingBox.reinit) {
         const box = new THREE.Box3().setFromObject(object);
-
         const size = new THREE.Vector3();
         box.getSize(size);
-
         const center = new THREE.Vector3();
         box.getCenter(center);
 
-        boundingBox.center = {
-          x: center.x,
-          y: center.y,
-        };
-        boundingBox.size = {
-          x: size.x,
-          y: size.y,
-        };
-
+        boundingBox.center = { x: center.x, y: center.y };
+        boundingBox.size = { x: size.x, y: size.y };
         boundingBox.reinit = false;
       }
 
       const aspect = camera.aspect;
       const vFov = THREE.MathUtils.degToRad(camera.fov);
-
-      // 세로 기준 거리
       const distanceY = boundingBox.size.y / 2 / Math.tan(vFov / 2);
-
-      // 가로 FOV
       const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
-
-      // 가로 기준 거리
       const distanceX = boundingBox.size.x / 2 / Math.tan(hFov / 2);
-
       const distance = Math.max(distanceX, distanceY) * offset;
 
-      // 카메라 위치
       camera.position.set(
         boundingBox.center.x,
         boundingBox.center.y,
         boundingBox.center.z + distance,
       );
-      // 중심 바라보기
       camera.lookAt(boundingBox.center);
-
       return boundingBox.center;
     };
 
-    // 블룸(Bloom) 설정
     const composer = new EffectComposer(renderer);
-
     const renderPass = new RenderPass(scene, camera);
     composer.addPass(renderPass);
 
     const bloomPass = new UnrealBloomPass(
       new THREE.Vector2(container.clientWidth / 2, container.clientHeight / 2),
-      1.5, // strength
-      0.4, // radius
-      0.85, // threshold
+      1.5,
+      0.4,
+      0.85,
     );
-
     composer.addPass(bloomPass);
 
-    // 창 크기 변경시 카메라 정보 조정
-    /** 창 크기가 변할 때마다 카메라가 왜곡되지 않도록 조정함 */
     const resizeCameraAspect = () => {
       const width = container.clientWidth;
       const height = container.clientHeight;
-
       const aspect = width / height;
 
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -290,12 +255,10 @@
     setTimeout(() => {
       resizeCameraAspect();
     }, 1000);
-    /** 페이지 개체 정보 */
+
     let page = null;
-    // 페이지 개체 기억하기
     let removeTargets = [];
     book_model.scene.traverse((obj) => {
-      // 개체 이름별로 설정 적용
       switch (obj.name) {
         case "PageRoot":
           page = obj.clone(true);
@@ -307,17 +270,14 @@
       }
     });
     removeTargets.forEach((obj) => {
-      obj.removeFromParent();
+      obj.removeFromParent?.();
     });
+
     let updateParticles: Function;
-    // 그림자 설정
     env.scene.traverse((obj) => {
-      // 개체 이름별로 설정 적용
       switch (obj.name) {
-        // 메인 스팟 조명
         case "main_spot":
           obj["intensity"] = 0;
-          // 시작하게 되면 서서히 조명을 밝힘
           const animate = () => {
             const animId = requestAnimationFrame(animate);
             if (obj["intensity"] < 100) {
@@ -328,36 +288,28 @@
             }
           };
           animate();
-
           obj.castShadow = true;
           obj.receiveShadow = false;
           break;
-        // 책이 배치되어야할 위치 지정
         case "bookPos":
           EmptyPageObj = obj;
           break;
-        // 바닥 테이블
         case "bottom":
           obj.receiveShadow = true;
-          // threejs 에서 static 개체와 유사하게 설정하여 업데이트 정보 최소화하기
           obj.matrixAutoUpdate = false;
           obj.castShadow = false;
           break;
-        // 파티클 생성 위치
         case "particlePos":
           const spawnPosition = new THREE.Vector3();
           obj.getWorldPosition(spawnPosition);
 
           const COUNT = 30;
-
           const geometry = new THREE.BufferGeometry();
-
           const positions = new Float32Array(COUNT * 3);
           const velocities = new Float32Array(COUNT);
           const life = new Float32Array(COUNT);
           const sizes = new Float32Array(COUNT);
-
-          const SPAWN_RADIUS = 0.4; // 생성 범위
+          const SPAWN_RADIUS = 0.4;
 
           for (let i = 0; i < COUNT; i++) {
             positions[i * 3 + 0] =
@@ -365,13 +317,10 @@
             positions[i * 3 + 1] = spawnPosition.y;
             positions[i * 3 + 2] =
               spawnPosition.z + (Math.random() - 0.5) * SPAWN_RADIUS;
-
-            velocities[i] = 0.001 + Math.random() * 0.002; // 더 느리게 (중요)
-
+            velocities[i] = 0.001 + Math.random() * 0.002;
             life[i] = Math.random();
-
-            const t = life[i]; // 0~1
-            sizes[i] = 1.0 - t; // 1 → 0
+            const t = life[i];
+            sizes[i] = 1.0 - t;
           }
 
           geometry.setAttribute(
@@ -393,32 +342,22 @@
 
           updateParticles = () => {
             const pos = geometry.attributes["position"].array;
-
             for (let i = 0; i < COUNT; i++) {
               const i3 = i * 3;
-
               life[i] += 0.002;
-
               pos[i3 + 1] += velocities[i];
-
               const t = life[i];
-
-              // ✔ scale 대신 “사실상 fade 느낌”
               sizes[i] = 1.0 - t;
 
               if (life[i] >= 1.0) {
                 life[i] = 0;
-
                 pos[i3 + 0] = spawnPosition.x + (Math.random() - 0.5);
                 pos[i3 + 1] = spawnPosition.y;
                 pos[i3 + 2] = spawnPosition.z + (Math.random() - 0.5);
-
                 velocities[i] = 0.001 + Math.random() * 0.002;
-
                 sizes[i] = 1.0;
               }
             }
-
             geometry.attributes["position"].needsUpdate = true;
             geometry.attributes["size"].needsUpdate = true;
           };
@@ -426,13 +365,10 @@
       }
     });
 
-    // 🔁 렌더 루프
     const clock = new THREE.Timer();
-
     targetBloom = 0.025;
     let bloomStrength = 0.05;
 
-    /** bloom 을 조정함 */
     const updateBloom = (delta: number) => {
       bloomStrength += (targetBloom - bloomStrength) * delta * 2;
       bloomPass.strength = bloomStrength;
@@ -455,7 +391,6 @@
 
     renderer.setAnimationLoop(animate);
 
-    // context 저장
     threeContext = {
       scene: scene,
       camera: camera,
@@ -469,22 +404,16 @@
     return threeContext;
   }
 
-  /** 비디오 텍스처 사용 대비 태그 */
   let VideoTexTag: HTMLVideoElement;
-  /** threejs 텍스처 개체 생성 */
   let VideoTexture: any;
-  /** 비디오 텍스처를 사용하는 경우 비디오 태그 생성 관리 */
   async function CreateVideoTexTag(obj: any, path: string) {
     try {
       RemoveVideoElement();
-      // 비디오 텍스처 대비 태그 생성
       let VideoTexTag = document.createElement("video");
-
       VideoTexTag.src = path;
       VideoTexTag.loop = true;
       VideoTexTag.muted = true;
       VideoTexTag.playsInline = true;
-
       await VideoTexTag.play();
 
       VideoTexture = new THREE.VideoTexture(VideoTexTag);
@@ -498,7 +427,6 @@
     }
   }
 
-  /** 비디오 개체 및 텍스처 삭제 */
   function RemoveVideoElement() {
     if (VideoTexTag) {
       VideoTexTag.pause();
@@ -509,7 +437,6 @@
     VideoTexture?.dispose();
   }
 
-  /** 개체 애니메이션 재생하기 */
   async function playAnimation(
     target: THREE.Object3D,
     clipName: string,
@@ -524,12 +451,8 @@
     const ctx = threeContext;
     if (!ctx) return null;
 
-    // 애니메이션 클립 찾기
     const clip = THREE.AnimationClip.findByName(ctx.env.animations, clipName);
-    // 대상 기준 mixer 생성
     const mixer = new THREE.AnimationMixer(target);
-
-    // action 생성
     const action = mixer.clipAction(clip, target);
 
     await new Promise((done: any) => {
@@ -538,7 +461,6 @@
         return null;
       }
 
-      // 기본 옵션
       const {
         loop = THREE.LoopOnce,
         repetitions = 1,
@@ -546,49 +468,28 @@
         onFinished,
       } = options || {};
 
-      // reset
       action.reset();
-
-      // 역재생 여부
       action.timeScale = options?.reverse ? -1 : 1;
-
-      // 시작 위치
       action.time = options?.reverse ? clip.duration : 0;
-
-      // loop 설정
       action.setLoop(loop, repetitions);
-
-      // 종료 시 마지막 프레임 유지 여부
       action.clampWhenFinished = clampWhenFinished;
-
-      // 재생
       action.play();
 
-      // mixer 등록
       mixers.push(mixer);
 
-      // cleanup
       const finishedHandler = () => {
         mixers = mixers.filter((m) => m !== mixer);
-
         mixer.removeEventListener("finished", finishedHandler);
-
         onFinished?.();
-
         done();
       };
 
       mixer.addEventListener("finished", finishedHandler);
     });
 
-    return {
-      mixer,
-      action,
-      clip,
-    };
+    return { mixer, action, clip };
   }
 
-  /** 페이지 애니메이션 보간용 */
   let pageAnimationMap = new Map<
     THREE.Object3D,
     {
@@ -599,7 +500,6 @@
   >();
 
   let mixers = [];
-  /** key 를 기반으로 페이지 애니메이션을 재생함 */
   function playPageAnimation(
     target: THREE.Object3D,
     key: string,
@@ -615,18 +515,14 @@
       ctx.book_model.animations,
       "PageRootAction",
     );
-
     const clip = THREE.AnimationClip.findByName(ctx.book_model.animations, key);
 
     if (!rootClip || !clip) return;
 
-    // 기존 상태 가져오기
     let state = pageAnimationMap.get(target);
 
-    // 최초 생성
     if (!state) {
       const mixer = new THREE.AnimationMixer(parent);
-
       const rootAction = mixer.clipAction(rootClip, parent);
       const pageAction = mixer.clipAction(clip, target);
 
@@ -638,33 +534,20 @@
 
       mixers.push(mixer);
 
-      state = {
-        mixer,
-        rootAction,
-        pageAction,
-      };
-
+      state = { mixer, rootAction, pageAction };
       pageAnimationMap.set(target, state);
     }
 
     const { rootAction, pageAction } = state;
-
-    // 현재 진행시간 유지
     const currentTime = pageAction.time;
 
-    // reset 하지 않음!!
     rootAction.paused = false;
     pageAction.paused = false;
-
-    // 현재 위치 기준 방향 반전
     rootAction.timeScale = reverse ? -1 : 1;
     pageAction.timeScale = reverse ? -1 : 1;
-
-    // 현재 시간 유지
     rootAction.time = currentTime;
     pageAction.time = currentTime;
 
-    // 끝점 보정
     if (reverse && currentTime <= 0) {
       rootAction.time = clip.duration;
       pageAction.time = clip.duration;
@@ -679,51 +562,31 @@
     pageAction.play();
   }
 
-  /** 대상 개체를 준비된 empty 개체의 자식으로 배치
-   * @param targetObject 변형을 적용하려는 개체
-   * @param emptyObject 준비된 empty 개체
-   * @returns 변형 적용된 targetObject 반환, 이후 미세 조정을 위해
-   */
   function applyEmptyTransform(targetObject: any, emptyObject: any) {
+    if (!targetObject || !emptyObject) return targetObject;
     targetObject.removeFromParent?.();
-
     emptyObject.add(targetObject);
-
     targetObject.position.set(0, 0, 0);
     targetObject.quaternion.identity();
     targetObject.scale.set(1, 1, 1);
-
     return targetObject;
   }
 
-  /** 0~1 linear => 0~1 ease */
   function easeInOutSine(t: number) {
     return -(Math.cos(Math.PI * t) - 1) / 2;
   }
 
-  /** Bounding Box Fitting 카메라 fov 계산 */
   function calcFitFOV() {
-    /** blender 에서 미리 측정한 두 개체간 거리 */
     const dist = 2.88446;
-    /** 페이지 배율 조정 */
     const ratio = 3500;
-    // 세로 기준
     const vFOV = 2 * Math.atan(PageSize.y / ratio / (2 * dist));
-
-    // 가로 기준
     const hFOV = 2 * Math.atan(PageSize.x / ratio / (2 * dist));
-
-    // horizontal -> vertical 변환
     const hFOV_as_vFOV =
       2 * Math.atan(Math.tan(hFOV / 2) / threeContext.camera.aspect);
-
-    // 더 큰 쪽 채택
     const finalFOV = Math.max(vFOV, hFOV_as_vFOV);
-
     return THREE.MathUtils.radToDeg(finalFOV);
   }
 
-  /** 점진적 카메라 fov 변경 */
   function animateFOV(camera: any, targetFov: number, duration = 1000) {
     if (!camera) return;
     cancelAnimationFrame(camera._fovRAF);
@@ -733,11 +596,8 @@
 
     const update = (now: number) => {
       const t = Math.min((now - startTime) / duration, 1);
-
       const eased = easeInOutSine(t);
-
       camera.fov = startFov + (targetFov - startFov) * eased;
-
       camera.updateProjectionMatrix();
 
       if (t < 1) {
@@ -745,7 +605,6 @@
       } else {
         camera.fov = targetFov;
         camera.updateProjectionMatrix();
-
         camera._fovRAF = null;
       }
     };
@@ -753,14 +612,11 @@
     camera._fovRAF = requestAnimationFrame(update);
   }
 
-  /** 표지 보기 애니메이션 동작 여부 */
   let isCoverAnimPlaying = true;
-  /** 양식에 맞춰 epub 파일 구성 준비 */
   async function LoadUIButtons() {
     console.log("LoadUIButtons");
   }
 
-  /** 카메라 앞으로 책 가져오기 */
   function idle_zoom_act() {
     animateFOV(threeContext.camera, calcFitFOV());
     if (AllPages[0].video) {
@@ -783,15 +639,11 @@
     LookCoverStatus = "front";
   }
 
-  /** 앞표지 보기 */
   function MakeThumbnailPageCurrent() {
-    // 현재 보고있는 페이지 썸네일화
     const current = CurrentViewPage - 1;
     if (current > 0)
       setTimeout(() => {
-        // 현재 보고있는 페이지 썸네일화
         if (!singlePageForm)
-          // 단일 페이지 뷰라면 전 페이지 구성하지 않음
           LoadCurrentThumbnail(AllPages[current].page, current * 2, {
             isEmission: true,
             isFront: false,
@@ -805,7 +657,6 @@
       }, 1000);
   }
 
-  /** 뒷표지에서 앞표지 보기 행동 */
   function back_cover_act() {
     animateFOV(threeContext.camera, calcFitFOV());
     playAnimation(EmptyPageObj, "lookCoverBack", {
@@ -817,7 +668,6 @@
     LookCoverStatus = "front";
   }
 
-  /** 하단 컨트롤 버튼 애니메이션 */
   function button_anim(node: any) {
     return {
       duration: 1000,
@@ -836,17 +686,14 @@
     };
   }
 
-  /** 앞면 보기 */
   function showFrontCover() {
     if (isCoverAnimPlaying) return;
     targetBloom = 0;
     isCoverAnimPlaying = true;
     switch (LookCoverStatus) {
-      // 최초 (앞면 보기)
       case "idle":
         idle_zoom_act();
         break;
-      // 뒷면 보기
       case "front":
         {
           if (CurrentViewPage == 0) {
@@ -898,9 +745,20 @@
     }
   }
 
+  // 🌟 다음 버튼: 5페이지(인덱스 4)를 본 상태에서 다음 페이지 시도 시 차단 및 구매 모달 표출
   function NextPageBtn() {
+    if (isPreviewMode.value && UserViewPage >= 4) {
+      showBuyGuideModal = true;
+      return; // 🌟 3D 페이지 넘김 함수(NextPage)로 진입하지 않고 즉시 차단
+    }
+
     if (isCoverAnimPlaying) return;
-    // 아직 책자 확대가 안되어있다면 확대하기
+
+    if (isPreviewMode.value && UserViewPage >= 4) {
+      showBuyGuideModal = true;
+      return;
+    }
+
     switch (LookCoverStatus) {
       case "idle":
         if (CurrentViewPage == 0) idle_zoom_act();
@@ -912,11 +770,9 @@
     NextPage();
   }
 
-  /** 종료 버튼 */
   async function ChooseBtn() {
     if (isCoverAnimPlaying || isRunPageAnimating) return;
     isCoverAnimPlaying = true;
-    // 책이 뒤집혀있다면 돌리기
     if (LookCoverStatus == "back")
       await playAnimation(EmptyPageObj, "lookCoverBack", {
         onFinished: () => {
@@ -924,7 +780,7 @@
         },
         reverse: true,
       });
-    // 책 접은 후 책 빼기
+
     if (LookCoverStatus != "idle") {
       animateFOV(threeContext.camera, 22.89);
 
@@ -951,7 +807,6 @@
       LookCoverStatus = "idle";
     }
     const closeBook = async () => {
-      // 책 덮기
       for (let i = 0, j = CurrentViewPage; i < j; i++) {
         PrevPage(true);
         await new Promise((done) => setTimeout(done, 70));
@@ -963,23 +818,21 @@
     MakeThumbnailPageCurrent();
     closeBook();
     toggleMove(threeContext.scene?.getObjectByName("page_center"), false);
-    // 리스트에서 다른 책 고르기
   }
 
-  /** 파일을 다운받고 로컬에 기록하기 */
+  /** 파일을 다운받고 로컬에 기록하기 (기존의 전체 정상 로드 구조로 완전 복구) */
   async function LoadEpubFileAsForm(info: BookInfo, file: File) {
     const actId = "loadEpub";
-    // 페이지 정보 초기화
     PageSize.x = 0;
     PageSize.y = 0;
     if (PagePaths) PagePaths.length = 0;
     PagePaths = null;
-    // 파일 정보로부터 epub 분해하기
+
+    // 🌟 책의 모든 페이지를 원본 그대로 온전하게 추출
     const epub = await loadEpub(file);
     PagePaths = getSortedImagePaths(epub);
-    // 이미지 경로들로부터 파일을 수집하고 각각 준비된 경로로 저장
+
     const maxSize = 512;
-    /** jpg 퀄리티 */
     const quality = 0.9;
     for (let i = 0, j = PagePaths.length; i < j; i++) {
       toastManager.upsertToast({
@@ -992,26 +845,20 @@
       const FileURL = URL.createObjectURL(blob);
       await new Promise((done: any, err) => {
         const img = new Image();
-        img.crossOrigin = "anonymous"; // 필요시 CORS 설정
+        img.crossOrigin = "anonymous";
 
         img.onload = async () => {
           try {
-            // 원본 크기
             const w = img.naturalWidth;
             const h = img.naturalHeight;
 
-            // 원본 크기를 기억
             if (!PageSize.x) PageSize.x = w;
             if (!PageSize.y) PageSize.y = h;
 
-            // 긴 변 기준 스케일 계산
             const scale = Math.min(maxSize / Math.max(w, h), 1);
-
-            // 최종 크기
             const newW = Math.round(w * scale);
             const newH = Math.round(h * scale);
 
-            // 캔버스 생성 및 리사이즈 적용
             const canvas = document.createElement("canvas");
             canvas.width = newW;
             canvas.height = newH;
@@ -1019,7 +866,6 @@
             const ctx = canvas.getContext("2d");
             ctx.drawImage(img, 0, 0, newW, newH);
 
-            // Blob 변환
             const blob: Blob = await new Promise((resolve) => {
               canvas.toBlob(
                 (getBlob) => {
@@ -1057,8 +903,9 @@
     isEPubLoaded = true;
   }
 
-  /** 최초가 아니라서 읽고있던 책이 있었다면 마지막 읽던 위치 정보를 기록하기 */
   function WriteProgressBook() {
+    if (isPreviewMode.value) return;
+
     if (CurrentBookInfo && LookCoverStatus != "idle") {
       CurrentBookInfo["user_read"] = UserViewPage;
       CurrentBookInfo["progress"] = Math.max(
@@ -1070,6 +917,12 @@
 
   /** 다음 페이지 보기 */
   function NextPage(force?: boolean) {
+    // 🌟 맛보기 모드: 5페이지 초과 탐색 시 차단 및 구매 안내 모달 표출
+    if (isPreviewMode.value && !force && UserViewPage >= 4) {
+      showBuyGuideModal = true;
+      return;
+    }
+
     if (CurrentViewPage < AllPages.length) {
       targetBloom = 0;
       if (singlePageForm || force) {
@@ -1103,7 +956,6 @@
             isBlank: true,
           });
         } else {
-          // 뒷표지
           toggleMove(threeContext.scene?.getObjectByName("page_center"), true);
           LoadCurrentThumbnail(AllPages[current].page, CurrentViewPage, {
             isEmission: true,
@@ -1112,7 +964,6 @@
           });
         }
         setTimeout(() => {
-          // 지나간 페이지
           if (!AllPages[current].video && current != CurrentViewPage)
             LoadCurrentThumbnail(AllPages[current].page, current, {
               isEmission: true,
@@ -1121,15 +972,13 @@
             });
         }, 1000);
       } else {
-        // 양쪽 페이지
         if (CurrentViewPage == 0) isMoved = true;
         if (CurrentViewPage == AllPages.length - 1) isMoved = false;
-        // 움직였다면 왼쪽 보는중
+
         if (isMoved && CurrentViewPage != 0) {
           toggleMove(threeContext.scene?.getObjectByName("page_center"));
           UserViewPage++;
         } else {
-          // 움직이지 않았다면 오른쪽 보는중
           const PageObj = AllPages[CurrentViewPage].page;
           playPageAnimation(PageObj, "PlaneAction");
           toggleMove(threeContext.scene?.getObjectByName("page_center"));
@@ -1146,7 +995,7 @@
           const current = CurrentViewPage;
           CurrentViewPage++;
           UserViewPage++;
-          // 맨 앞 페이지 열외
+
           if (CurrentViewPage == 1) {
             LoadCurrentThumbnail(AllPages[current].page, current, {
               isEmission: true,
@@ -1181,17 +1030,15 @@
             );
             if (checkLast) isMoved = false;
           } else {
-            // 뒷표지
             LoadCurrentThumbnail(AllPages[current].page, PagePaths.length - 1, {
               isEmission: true,
               isFront: false,
               isOriginal: true,
             });
           }
-          // 지나간 페이지
+
           setTimeout(() => {
             if (current == CurrentViewPage) return;
-            // 맨 앞 페이지 열외
             if (current == 0) {
               if (!AllPages[current].video)
                 LoadCurrentThumbnail(AllPages[current].page, current, {
@@ -1214,7 +1061,6 @@
                   isOriginal: false,
                 });
             } else {
-              // 뒷표지
               LoadCurrentThumbnail(AllPages[prev].page, PagePaths.length - 2, {
                 isEmission: true,
                 isFront: false,
@@ -1251,7 +1097,6 @@
               });
             }, 1000);
           } else {
-            // 뒷표지
             toggleMove(
               threeContext.scene?.getObjectByName("page_center"),
               false,
@@ -1280,10 +1125,9 @@
           }
         }
       } else {
-        // 양쪽 페이지
         if (CurrentViewPage == 1 || UserViewPage == PagePaths.length - 2)
           isMoved = true;
-        // 움직이지 않았다면 오른쪽 보는중
+
         if (!isMoved && CurrentViewPage != AllPages.length - 1) {
           toggleMove(threeContext.scene?.getObjectByName("page_center"));
           UserViewPage--;
@@ -1293,7 +1137,7 @@
           UserViewPage--;
           const current = CurrentViewPage;
           const next = CurrentViewPage - 1;
-          // 움직였다면 왼쪽 보는중
+
           const PageObj = AllPages[CurrentViewPage].page;
           if (prev == AllPages.length) isMoved = false;
           playPageAnimation(PageObj, "PlaneAction", true);
@@ -1307,7 +1151,7 @@
               AllPages[i].root.position.y = prevPage.root.userData.baseY;
             }
           }
-          // 맨 앞 페이지 열외
+
           if (CurrentViewPage == 0) {
             if (!AllPages[CurrentViewPage].video)
               LoadCurrentThumbnail(
@@ -1337,17 +1181,15 @@
                 },
               );
           } else {
-            // 뒷표지
             LoadCurrentThumbnail(AllPages[next].page, PagePaths.length - 1, {
               isEmission: true,
               isFront: false,
               isOriginal: true,
             });
           }
-          // 지나간 페이지
+
           setTimeout(() => {
             if (prev == CurrentViewPage) return;
-            // 맨 앞 페이지 열외
             if (current == 0) {
               LoadCurrentThumbnail(AllPages[prev].page, prev, {
                 isEmission: true,
@@ -1368,7 +1210,6 @@
                   isOriginal: false,
                 });
             } else {
-              // 뒷표지
               LoadCurrentThumbnail(
                 AllPages[current].page,
                 PagePaths.length - 1,
@@ -1386,27 +1227,19 @@
     }
   }
 
-  /** 책이 마지막 페이지 도달 등으로 왼쪽 페이지에 집중했는지 여부 */
   let isMoved = false;
   let moveAnimation = undefined as {
     object: THREE.Object3D;
-
     from: THREE.Vector3;
     to: THREE.Vector3;
-
     duration: number;
     elapsed: number;
   };
-  /** 페이지 간 거리 측정 */
   let PageDistance = 0;
-  /** 페이지를 옮김 */
   function toggleMove(object: THREE.Object3D, force?: boolean) {
     isMoved = force ?? !isMoved;
-
     const duration: number = 1;
-
     const from = object.position.clone();
-
     const to = isMoved
       ? new THREE.Vector3(PageDistance, from.y, from.z)
       : new THREE.Vector3(0, from.y, from.z);
@@ -1426,19 +1259,12 @@
 
   function updateMoveAnimation(delta: number) {
     if (!moveAnimation) return;
-
     const anim = moveAnimation;
-
     anim.elapsed += delta;
-
     let t = anim.elapsed / anim.duration;
-
     if (t > 1) t = 1;
-
     const eased = easeInOutCubic(t);
-
     anim.object.position.lerpVectors(anim.from, anim.to, eased);
-
     if (t >= 1) {
       moveAnimation = undefined;
     }
@@ -1448,28 +1274,18 @@
   let tempVecB = new THREE.Vector3();
   let tempDir = new THREE.Vector3();
 
-  /** 두 Object3D 의 월드 원점 기준 거리 반환 */
   function getObjectDistanceData(a: THREE.Object3D, b: THREE.Object3D) {
     a.getWorldPosition(tempVecA);
     b.getWorldPosition(tempVecB);
-
     const distance = tempVecA.distanceTo(tempVecB);
-
     const direction = tempDir.subVectors(tempVecB, tempVecA).normalize();
-
-    return {
-      distance,
-      direction,
-    };
+    return { distance, direction };
   }
 
-  /** 미리 준비된 페이지 정보로 */
   async function CreatePageObject(options?: { videoCover?: string }) {
     AllPages.length = 0;
-    // 책의 중심이 배치 위치가 되도록 함
     const pageCenter = threeContext.scene?.getObjectByName("page_center");
     applyEmptyTransform(pageCenter, EmptyPageObj);
-    /** 책 등의 중심이지만 책이 넘어가는 애니메이션을 하기 위해 책 페이지 중심도 이것을 씀 */
     const cover_center = threeContext.scene?.getObjectByName("cover_center");
     const ratio = 7500;
     pageCenter.scale.set(PageSize.x / ratio, 1, PageSize.y / ratio);
@@ -1480,29 +1296,25 @@
     });
     pageCenter.scale.set(1, 1, 1);
     PageDistance = getObjectDistanceData(pageCenter, childCache).distance * 2;
-    // 페이지 추가하기
+
     const PageRoot = threeContext.page?.getObjectByName("PageRoot");
-    /** 책 두께에 맞게 계산 */
     const scaleX = PageSize.x / ratio;
     const scaleZ = PageSize.y / ratio;
-    // 책 커버 페이지는 앞쪽 단면
+
+    // 앞표지 단면
     {
       const pageRoot = PageRoot.clone(true);
       const PageObj = pageRoot.getObjectByName("Page");
       PageObj.castShadow = true;
       PageObj.receiveShadow = false;
-      // 각 메시에 대해 material과 morphTarget 적용
       PageObj.traverse((obj) => {
         if (obj.isMesh) {
-          // material 복제
           obj.material = obj.material.clone();
           obj.geometry.computeBoundingBox();
-          // morphTarget 위치 조정
           if (obj.geometry.morphAttributes.position) {
             const morphPositions = obj.geometry.morphAttributes.position;
             morphPositions.forEach((attr) => {
               for (let i = 0; i < attr.count; i++) {
-                // 기존 vertex 좌표에 스케일 적용
                 attr.setY(i, attr.getY(i) * scaleZ);
               }
             });
@@ -1510,7 +1322,6 @@
           }
         }
       });
-      // 스케일 비율 계산
       PageObj.scale.set(scaleX, 1, scaleZ);
       applyEmptyTransform(pageRoot, cover_center);
       try {
@@ -1530,25 +1341,22 @@
         video: Boolean(options?.videoCover),
       });
     }
+
     const pageSet = singlePageForm ? 1 : 2;
-    // 책 내용 페이지는 양면
+    // 본문 양면
     for (let i = 1, j = PagePaths.length - 2; i < j; i += pageSet) {
       const pageRoot = PageRoot.clone(true);
       const PageObj = pageRoot.getObjectByName("Page");
       PageObj.castShadow = true;
       PageObj.receiveShadow = false;
-      // 각 메시에 대해 material과 morphTarget 적용
       PageObj.traverse((obj) => {
         if (obj.isMesh) {
-          // material 복제
           obj.material = obj.material.clone();
           obj.geometry.computeBoundingBox();
-          // morphTarget 위치 조정
           if (obj.geometry.morphAttributes.position) {
             const morphPositions = obj.geometry.morphAttributes.position;
             morphPositions.forEach((attr) => {
               for (let i = 0; i < attr.count; i++) {
-                // 기존 vertex 좌표에 스케일 적용
                 attr.setY(i, attr.getY(i) * scaleZ);
               }
             });
@@ -1556,7 +1364,6 @@
           }
         }
       });
-      // 스케일 비율 계산
       PageObj.scale.set(scaleX, 1, scaleZ);
       applyEmptyTransform(pageRoot, cover_center);
       await LoadCurrentThumbnail(PageObj, i);
@@ -1569,24 +1376,21 @@
       pageRoot.userData.baseY = pageRoot.position.y;
       AllPages.push({ root: pageRoot, page: PageObj });
     }
-    // 책 뒷 커버 페이지는 뒷쪽 단면
+
+    // 뒷표지 단면
     {
       const pageRoot = PageRoot.clone(true);
       const PageObj = pageRoot.getObjectByName("Page");
       PageObj.castShadow = true;
       PageObj.receiveShadow = false;
-      // 각 메시에 대해 material과 morphTarget 적용
       PageObj.traverse((obj) => {
         if (obj.isMesh) {
-          // material 복제
           obj.material = obj.material.clone();
           obj.geometry.computeBoundingBox();
-          // morphTarget 위치 조정
           if (obj.geometry.morphAttributes.position) {
             const morphPositions = obj.geometry.morphAttributes.position;
             morphPositions.forEach((attr) => {
               for (let i = 0; i < attr.count; i++) {
-                // 기존 vertex 좌표에 스케일 적용
                 attr.setY(i, attr.getY(i) * scaleZ);
               }
             });
@@ -1594,7 +1398,6 @@
           }
         }
       });
-      // 스케일 비율 계산
       PageObj.scale.set(scaleX, 1, scaleZ);
       applyEmptyTransform(pageRoot, cover_center);
       await LoadCurrentThumbnail(PageObj, PagePaths.length - 1, {
@@ -1606,8 +1409,8 @@
       PageObj.name = `Page_${Math.round((PagePaths.length - 1) / 2)}`;
       pageRoot.userData.baseY = pageRoot.position.y;
       AllPages.push({ root: pageRoot, page: PageObj });
-      // 등장 애니메이션 재생
     }
+
     playAnimation(EmptyPageObj, "BookShow", {
       onFinished: () => {
         isCoverAnimPlaying = false;
@@ -1616,27 +1419,21 @@
     await new Promise(requestAnimationFrame);
   }
 
-  /** 순차적 emission 적용 */
   function animateEmissive(obj: any, target: number, duration = 500) {
     cancelAnimationFrame(obj._raf);
-
     const start = obj.material.emissiveIntensity;
     const startTime = performance.now();
 
     const update = (now: number) => {
       const t = Math.min((now - startTime) / duration, 1);
-
       const eased = easeInOutSine(t);
-
       obj.material.emissiveIntensity = start + (target - start) * eased;
-
       if (t < 1) obj._raf = requestAnimationFrame(update);
     };
 
     obj._raf = requestAnimationFrame(update);
   }
 
-  /** 페이지 개체에 적합한 썸네일 적용하기 */
   async function LoadCurrentThumbnail(
     obj: any,
     i: number,
@@ -1653,39 +1450,28 @@
     let texture: THREE.Texture;
 
     if (isBlank) {
-      // 1x1 white texture 생성
       const data = new Uint8Array([255, 255, 255, 255]);
-
       texture = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
-
       texture.needsUpdate = true;
     } else {
       if (!PagePaths[i]) return;
       const path = isOriginal ? PagePaths[i] : `${PagePaths[i]}_thumbnail.jpg`;
-
       const blob = await indexed.loadBlobFromUserPath(path, "image/jpg");
-
       const bitmap = await createImageBitmap(blob);
-
       texture = new THREE.Texture(bitmap);
-
       texture.flipY = false;
       texture.needsUpdate = true;
       texture.colorSpace = THREE.SRGBColorSpace;
     }
 
     const oldTexture = targetObj.material.map;
-
-    if (oldTexture) {
-      oldTexture.dispose();
-    }
+    if (oldTexture) oldTexture.dispose();
 
     targetObj.material.map = texture;
 
     if (isEmission) {
       targetObj.material.emissive = new THREE.Color(0xffffff);
       targetObj.material.emissiveMap = texture;
-
       if (targetObj.material.emissiveIntensity < 1) {
         animateEmissive(targetObj, 1);
       }
@@ -1695,10 +1481,6 @@
     targetObj.material.needsUpdate = true;
   }
 
-  /** 불러온 씬 개체를 제거함, 단독 개체 (obj.clone) 역시 하이라키 구성이기 때문에 이걸로 삭제됨
-   *
-   * 이 함수 이후에 scene = null 처리
-   */
   function disposeObject3D(
     root: any,
     options: {
@@ -1708,34 +1490,23 @@
     } = {},
   ) {
     if (!root) return;
-
     const keepRoot = options.keepRoot ?? false;
     const excludeNames = options.excludeNames ?? [];
     const skipDisposeNames = options.skipDisposeNames ?? [];
-
     const isExcluded = (obj: any) => excludeNames.includes(obj.name);
-
     const shouldSkipDispose = (obj: any) => skipDisposeNames.includes(obj.name);
 
     root.traverse((obj: any) => {
       if (keepRoot && obj === root) return;
-
-      // 완전 제외 (remove도 안 함)
       if (isExcluded(obj)) return;
-
-      // geometry dispose
       if (obj.geometry && !shouldSkipDispose(obj)) {
         obj.geometry.dispose();
       }
-
-      // material dispose
       if (obj.material && !shouldSkipDispose(obj)) {
         const disposeMaterial = (material: any) => {
           for (const key in material) {
             const value = material[key];
-            if (value && value.isTexture) {
-              value.dispose();
-            }
+            if (value && value.isTexture) value.dispose();
           }
           material.dispose();
         };
@@ -1748,66 +1519,28 @@
       }
     });
 
-    // root 제거 or children 정리
     if (!keepRoot) {
-      if (root.parent) {
-        root.parent.remove(root);
-      }
+      if (root.parent) root.parent.remove(root);
     } else {
       const childrenToRemove = root.children.filter((child: any) => {
         if (excludeNames.includes(child.name)) return false;
         return true;
       });
-
       childrenToRemove.forEach((child: any) => {
         root.remove(child);
       });
     }
   }
 
-  /** indexedDB 를 전부 탐색하여 삭제함 (DB 초기화) */
   async function ClearIndexedDB() {
     const tree = await indexed.GetFileListFromDB("");
     for (let path of tree) await indexed.removeFileFromUserPath(path);
   }
 
-  /** epub 파일 불러오기 */
   async function loadEpub(file: File) {
-    const zip = await JSZip.loadAsync(file);
-    return zip;
-  }
-  /** 파일 경로 검토 */
-  function logZipTree(zip: JSZip) {
-    Object.keys(zip.files).forEach((path) => {
-      const file = zip.files[path];
-      console.log(path, file.dir ? "[DIR]" : "[FILE]");
-    });
-  }
-  /** 디버그용, 현재 씬 하이라키 로그 출력 */
-  function printHierarchy(root: THREE.Object3D) {
-    if (!root) return;
-
-    root.traverse((obj: THREE.Object3D) => {
-      const depth = getDepth(obj);
-      const indent = "  ".repeat(depth);
-
-      console.log(`${indent}- ${obj.name || obj.type}`);
-    });
+    return await JSZip.loadAsync(file);
   }
 
-  // depth 계산 함수
-  function getDepth(obj: THREE.Object3D): number {
-    let depth = 0;
-    let current: THREE.Object3D | null = obj;
-
-    while (current.parent) {
-      depth++;
-      current = current.parent;
-    }
-
-    return depth;
-  }
-  /** 경로로부터 이미지들만 수집 */
   function getSortedImagePaths(zip: JSZip): string[] {
     return Object.keys(zip.files)
       .filter((path) => {
@@ -1815,24 +1548,22 @@
       })
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }
-  /** zip 에서 경로에 기반하여 blob 추출 */
+
   async function getImageBlob(zip: JSZip, path: string): Promise<Blob> {
     const file = zip.file(path);
     if (!file) throw new Error(`파일 없음: ${path}`);
-
     return await file.async("blob");
   }
 
-  /** epub 파일이 전부 불러와지면 페이지 표시 */
   let isEPubLoaded = $state(false);
-  /** 파일 불러오기 */
   async function LoadEpubFromURL(info: BookInfo) {
     isEPubLoaded = false;
-    LastViewedBookId = info.id;
     const actId = "loadEpub";
     toastManager.upsertToast({
       id: actId,
-      message: "전자책 정보를 다운받는 중",
+      message: isPreviewMode.value
+        ? "맛보기 도서 다운로드 중"
+        : "전자책 정보를 다운받는 중",
     });
     try {
       const response = await fetch(info.epub_url);
@@ -1840,10 +1571,6 @@
         throw new Error(`Failed to fetch file: ${response.statusText}`);
 
       const contentLength = response.headers.get("Content-Length");
-      if (!contentLength) {
-        console.warn("Content-Length header is missing, progress unavailable");
-      }
-
       const total = contentLength ? parseInt(contentLength, 10) : 0;
       const reader = response.body.getReader();
       const chunks = [];
@@ -1859,27 +1586,25 @@
           const percent = (receivedLength / total) * 100;
           toastManager.upsertToast({
             id: actId,
-            message: "전자책 정보를 다운받는 중",
+            message: isPreviewMode.value
+              ? "맛보기 도서 다운로드 중"
+              : "전자책 정보를 다운받는 중",
             progress: Math.floor(percent),
           });
         }
       }
 
-      // 모든 청크를 합쳐 Blob 생성
       const blob = new Blob(chunks);
       const fileName = info.epub_url.split("/").pop() || "download.epub";
       const file = new File([blob], fileName, { type: blob.type });
 
-      // 기존 EPUB 로딩 함수 호출
       LoadEpubFileAsForm(info, file);
     } catch (err) {
       console.error("EPUB 다운로드 실패:", err);
     }
   }
 
-  /** 페이지 번호를 사용자가 눌렀는지 여부 */
   let isPageNumberClicked = $state(false);
-  /** 페이지 이동 행동을 반복시키지 않음 */
   let isRunPageAnimating = false;
   async function UserWantInputPageNumber() {
     if (isRunPageAnimating) return;
@@ -1890,11 +1615,17 @@
         document.getElementById("UserInputPage").focus();
       });
     } else {
-      // 페이지 찾기 행동을 하는 동안 중복 요청 막기
       isRunPageAnimating = true;
       const CurrentPage = UserViewPage || CurrentViewPage;
       const inputValue = document.getElementById("UserInputPage")["value"];
-      const userInputPage = inputValue ? Number(inputValue) - 1 : CurrentPage;
+      let userInputPage = inputValue ? Number(inputValue) - 1 : CurrentPage;
+
+      // 🌟 맛보기 모드: 5페이지(인덱스 4)를 초과하는 번호 입력 시 차단 및 구매 유도 모달 표출
+      if (isPreviewMode.value && userInputPage >= 4) {
+        showBuyGuideModal = true;
+        userInputPage = Math.min(4, userInputPage);
+      }
+
       const filtered = Math.min(
         PagePaths.length - 1,
         Math.max(0, userInputPage),
@@ -1927,7 +1658,6 @@
     for (let key of keys) {
       switch (key) {
         case "container":
-          // div 컨테이너는 알아서 삭제될 것입니다
           threeContext[key].remove();
           break;
         case "renderer":
@@ -1959,8 +1689,6 @@
         overflow: hidden;
     "
 >
-  <!-- 우측상단 페이지 정보 -->
-
   {#if isEPubLoaded}
     <button
       onclick={UserWantInputPageNumber}
@@ -1973,8 +1701,26 @@
                 font-size: 32px;
                 cursor: pointer;
                 color: white;
+                display: flex;
+                align-items: center;
+                gap: 8px;
             "
     >
+      {#if isPreviewMode.value}
+        <span
+          style="
+            font-size: 13px;
+            font-weight: 700;
+            background: #ff9f0a;
+            color: black;
+            padding: 4px 8px;
+            border-radius: 6px;
+          "
+        >
+          맛보기
+        </span>
+      {/if}
+
       {#if !isPageNumberClicked}
         <span>
           {(UserViewPage || 0) + 1}
@@ -1986,18 +1732,18 @@
             type="number"
             placeholder={`${(UserViewPage || 0) + 1}`}
             style="
-                            width: 100px;
-                            height: 40px;
-                            text-align: right;
-                            font-size: 32px;
-                            margin: 0;
-                            padding: 0;
-                            border: none;
-                            outline: none;
-                            box-sizing: border-box;
-                            background-color: transparent;
-                            color: white;
-                        "
+              width: 100px;
+              height: 40px;
+              text-align: right;
+              font-size: 32px;
+              margin: 0;
+              padding: 0;
+              border: none;
+              outline: none;
+              box-sizing: border-box;
+              background-color: transparent;
+              color: white;
+            "
             onblur={UserWantInputPageNumber}
             onkeydown={(e) => {
               if (e.key === "Enter") {
@@ -2010,9 +1756,9 @@
 
       <span
         style="
-                    pointer-events: none;
-                    user-select: none;
-                "
+          pointer-events: none;
+          user-select: none;
+        "
       >
         | {PagePaths?.length || 0}
       </span>
@@ -2025,7 +1771,6 @@
       style="pointer-events: auto;"
       transition:fly={{ y: 50 }}
     >
-      <!-- UI 버튼 -->
       {#if isEPubLoaded && UserViewPage === 0}
         <button
           transition:button_anim
@@ -2042,7 +1787,7 @@
         >
       {/if}
 
-      {#if isEPubLoaded && LookCoverStatus != "idle" && UserViewPage != PagePaths?.length - 1}
+      {#if isEPubLoaded && LookCoverStatus != "idle"}
         <button
           transition:button_anim
           class="button_style"
@@ -2051,11 +1796,54 @@
       {/if}
     </div>
   {/if}
+
+  <!-- 🌟 5페이지 초과 시도 시 표출되는 구매 유도 모달 (z-index 없이 DOM 자연 순서로 최상단 배치) -->
+  {#if showBuyGuideModal}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="guide-modal-backdrop"
+      transition:fade={{ duration: 150 }}
+      onclick={() => (showBuyGuideModal = false)}
+    >
+      <div
+        class="guide-modal-card"
+        transition:scale={{ start: 0.95, duration: 180 }}
+        onclick={(e) => e.stopPropagation()}
+      >
+        <div class="guide-icon">📖</div>
+        <h3>5페이지 미리보기가 종료되었습니다</h3>
+        <p>
+          준비된 맛보기 페이지를 모두 감상하셨습니다.<br />
+          전체 내용을 이어서 읽으시려면 도서를 구매해 주세요.
+        </p>
+
+        <div class="guide-btn-row">
+          <button
+            class="guide-btn-close"
+            onclick={() => (showBuyGuideModal = false)}
+          >
+            닫기
+          </button>
+          <button
+            class="guide-btn-buy"
+            onclick={() => {
+              showBuyGuideModal = false;
+              OpenBookList();
+              TransferAct["BuyBook"]?.(CurrentBookInfo);
+            }}
+          >
+            {CurrentBookInfo?.price
+              ? `${CurrentBookInfo.price.toLocaleString()}원에 구매하기`
+              : "전체 도서 구매하기"}
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
-  /* 페이지 입력칸에 위아래 숫자 스피너 제거 */
-
   input[type="number"] {
     -moz-appearance: textfield;
     appearance: textfield;
@@ -2100,5 +1888,78 @@
     cursor: pointer;
     padding: 0px;
     font-size: 16px;
+  }
+
+  /* 🌟 z-index 일체 배제한 모달 레이어 */
+  .guide-modal-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(6px);
+  }
+
+  .guide-modal-card {
+    width: 90%;
+    max-width: 400px;
+    background: rgba(26, 26, 26, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 20px;
+    padding: 30px 24px;
+    text-align: center;
+    color: #ffffff;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+  }
+
+  .guide-icon {
+    font-size: 36px;
+    margin-bottom: 12px;
+  }
+
+  .guide-modal-card h3 {
+    margin: 0 0 10px 0;
+    font-size: 17px;
+    font-weight: 700;
+  }
+
+  .guide-modal-card p {
+    margin: 0 0 24px 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.65);
+  }
+
+  .guide-btn-row {
+    display: flex;
+    gap: 10px;
+  }
+
+  .guide-btn-close {
+    flex: 1;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .guide-btn-buy {
+    flex: 1.5;
+    padding: 12px;
+    border-radius: 10px;
+    border: none;
+    background: #0a84ff;
+    color: #ffffff;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
   }
 </style>
