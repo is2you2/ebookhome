@@ -10,6 +10,7 @@
     import { fade } from "svelte/transition";
     import * as PortOne from "@portone/browser-sdk/v2";
     import BookDetail from "./+BookDetail.svelte";
+    import { getAssetUrl } from "$lib/services/server.svelte";
 
     type TabType = "store" | "myBooks" | "profile";
     let activeTab = $state<TabType>("store");
@@ -197,7 +198,9 @@
                                 <div class="book-cover">
                                     {#if book.video_thumbnail}
                                         <video
-                                            src={book.video_thumbnail}
+                                            src={getAssetUrl(
+                                                book.video_thumbnail,
+                                            )}
                                             autoplay
                                             loop
                                             muted
@@ -206,7 +209,7 @@
                                         ></video>
                                     {:else}
                                         <img
-                                            src={book.thumbnail}
+                                            src={getAssetUrl(book.thumbnail)}
                                             alt={book.title}
                                             class="cover-media"
                                         />

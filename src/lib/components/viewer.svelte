@@ -1,4 +1,3 @@
-<!-- src/lib/components/viewer.svelte -->
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import * as THREE from "three";
@@ -20,6 +19,7 @@
   } from "$lib/services/global.svelte";
   import { indexed } from "$lib/services/indexed.svelte";
   import { encryptBuffer, decryptBuffer } from "$lib/services/crypto";
+  import { getAssetUrl } from "$lib/services/server.svelte";
 
   interface PageInfo {
     root: any;
@@ -31,15 +31,21 @@
     id: string;
     title: string;
     desc?: string;
+    description_url?: string; // 🌟 상세 소개 텍스트 파일 경로 (desc.txt)
     thumbnail: string;
-    video_thumbnail?: string;
-    epub_url: string;
-    last_view?: number;
-    purchase_time: number;
+    video_thumbnail?: string; // 영상 표지 경로 (cover.mp4)
+    epub_url: string; // 정식 원본 EPUB 경로 (book.epub)
+    preview_epub_url?: string; // 🌟 서버가 자동 생성한 5페이지 맛보기 EPUB 경로 (preview.epub)
     author: string;
-    user_read?: number;
-    progress?: number;
-    price?: number;
+    publisher?: string; // 🌟 출판사
+    price?: number; // 판매가
+    original_price?: number; // 🌟 정가 (할인율 표시용)
+    purchase_time?: number; // 구매 일시 타임스탬프
+    last_view?: number;
+    user_read?: number; // 마지막 읽은 페이지 인덱스
+    progress?: number; // 독서 진행률 (%)
+    rating?: number; // 평점 (선택)
+    rating_count?: number; // 리뷰 수 (선택)
   }
 
   let showBuyGuideModal = $state(false);
@@ -384,7 +390,7 @@
     try {
       RemoveVideoElement();
       let VideoTexTag = document.createElement("video");
-      VideoTexTag.src = path;
+      VideoTexTag.src = getAssetUrl(path);
       VideoTexTag.loop = true;
       VideoTexTag.muted = true;
       VideoTexTag.playsInline = true;
@@ -810,21 +816,27 @@
     const secretKey = getBookSecretKey(info.id);
 
     try {
-      // 1. IndexedDB에서 암호화된 파일 확인
-      let encrypted = await indexed.loadEncryptedBook(info.id);
+      // 🌟 맛보기 모드와 정식 구매본의 캐시 키 분리 (맛보기 파일이 정식본 캐시를 덮어쓰지 않도록 방어)
+      const bookCacheKey = isPreviewMode.value ? `${info.id}_preview` : info.id;
+      let encrypted = await indexed.loadEncryptedBook(bookCacheKey);
 
       if (!encrypted) {
         toastManager.upsertToast({
           id: actId,
           message: "도서 데이터 다운로드 중...",
         });
-        const res = await fetch(info.epub_url);
+
+        const targetPath =
+          isPreviewMode.value && info.preview_epub_url
+            ? info.preview_epub_url
+            : info.epub_url;
+
+        const res = await fetch(getAssetUrl(targetPath));
         if (!res.ok) throw new Error("도서 다운로드 실패");
         const rawBuffer = await res.arrayBuffer();
 
-        // 🌟 다운로드 즉시 AES-GCM 암호화하여 IndexedDB에 저장 (디스크 평문 노출 0%)
         encrypted = await encryptBuffer(rawBuffer, secretKey);
-        await indexed.saveEncryptedBook(info.id, encrypted);
+        await indexed.saveEncryptedBook(bookCacheKey, encrypted);
       }
 
       // 2. RAM 메모리 상에서만 즉석 복호화

@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { BookInfo } from "$lib/services/global.svelte";
+    import { getAssetUrl } from "$lib/services/server.svelte";
     import { fade, scale } from "svelte/transition";
 
     let {
@@ -38,7 +39,8 @@
     $effect(() => {
         if (book.description_url) {
             isLoadingDesc = true;
-            fetch(book.description_url)
+            // 🌟 노드 서버로부터 소개 텍스트 파일 로드
+            fetch(getAssetUrl(book.description_url))
                 .then((res) => {
                     if (!res.ok) throw new Error();
                     return res.text();
@@ -75,7 +77,7 @@
                 <div class="cover-media-box">
                     {#if book.video_thumbnail}
                         <video
-                            src={book.video_thumbnail}
+                            src={getAssetUrl(book.video_thumbnail)}
                             autoplay
                             loop
                             muted
@@ -84,7 +86,7 @@
                         ></video>
                     {:else}
                         <img
-                            src={book.thumbnail}
+                            src={getAssetUrl(book.thumbnail)}
                             alt={book.title}
                             class="media"
                         />

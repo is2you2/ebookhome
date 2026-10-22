@@ -3,6 +3,8 @@ export interface AuthUser {
     email?: string;
 }
 
+export const API_BASE_URL = "http://localhost:3000";
+
 const TOKEN_KEY = "auth_token";
 
 // 🌟 { value: _val } Svelte 5 반응형 상태
@@ -10,6 +12,19 @@ export const authToken = $state<{ value: string }>({ value: "" });
 export const currentUser = $state<{ value: AuthUser | null }>({ value: null });
 export const isServerLoading = $state<{ value: boolean }>({ value: false });
 export const currentSessionId = $state<{ value: string }>({ value: "" });
+
+/**
+ * DB에 저장된 상대 경로(assets/...)를 노드 서버의 절대 URL로 변환
+ */
+export function getAssetUrl(path?: string | null): string {
+    if (!path) return "";
+    // 이미 완전한 http/https 주소거나 data URL인 경우 그대로 반환
+    if (path.startsWith("http://") || path.startsWith("https://") || path.startsWith("blob:") || path.startsWith("data:")) {
+        return path;
+    }
+    const cleanPath = path.startsWith("/") ? path.slice(1) : path;
+    return `${API_BASE_URL}/${cleanPath}`;
+}
 
 /**
  * 브라우저 내장 API만으로 JWT 페이로드를 안전하게 디코딩
