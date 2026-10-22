@@ -153,17 +153,6 @@ const storage = multer.diskStorage({
     }
 });
 
-const uploadBookFiles = multer({
-    storage,
-    limits: { fileSize: 300 * 1024 * 1024 } // 300MB 제한
-}).fields([
-    { name: 'thumbnail', maxCount: 1 },
-    { name: 'video_thumbnail', maxCount: 1 },
-    { name: 'desc_file', maxCount: 1 },
-    { name: 'epub_file', maxCount: 1 },
-    { name: 'preview_epub_file', maxCount: 1 }
-]);
-
 // -------------------------------------------------------------
 // [관리자 API] 1. 인증 및 세션
 // -------------------------------------------------------------
@@ -205,16 +194,112 @@ app.post('/api/admin/change-password', authenticateAdmin, async (req, res) => {
     }
 });
 
-// -------------------------------------------------------------
-// [관리자 API] 2. 도서 등록 및 파일 업로드
-// -------------------------------------------------------------
-app.get('/api/admin/books', authenticateAdmin, (req, res) => {
-    try {
-        const books = db.prepare('SELECT * FROM books ORDER BY created_at DESC').all();
-        res.json(books);
-    } catch (err) {
-        res.status(500).json({ error: '도서 목록 조회 오류' });
-    }
+// server/index.js 내부 도서 업로드 라우트 수정
+
+const JSZip = require('jszip');
+
+// 1x1 크기의 초소형 백색 JPEG 바이너리 (5페이지 이후 치환용 더미)
+const BLANK_DUMMY_IMAGE = Buffer.from(
+    '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=',
+    'base64'
+);
+
+// 🌟 Multer 필드 단순화: 표지/맛보기 제거 -> EPUB 원본, 비디오(선택), 소개글(선택)만 수신
+const uploadBookFiles = multer({
+    storage,
+    limits: { fileSize: 300 * 1024 * 1024 }
+}).fields([
+    { name: 'epub_file', maxCount: 1 },
+    { name: 'video_thumbnail', maxCount: 1 },
+    { name: 'desc_file', maxCount: 1 }
+]);
+
+app.post('/api/admin/books', authenticateAdmin, (req, res) => {
+    uploadBookFiles(req, res, async (err) => {
+        if (err) return res.status(400).json({ error: `파일 업로드 실패: ${err.message}` });
+
+        const { id, title, author, publisher, price, original_price, desc } = req.body;
+        const bookId = req.uploadedBookId || id;
+
+        if (!bookId || !title || !author) {
+            return res.status(400).json({ error: '도서 식별자, 제목, 저자는 필수 항목입니다.' });
+        }
+
+        const files = req.files || {};
+        const epubFileObj = files['epub_file'] ? files['epub_file'][0] : null;
+
+        if (!epubFileObj && !req.body.epub_url) {
+            return res.status(400).json({ error: '원본 EPUB 파일이 필요합니다.' });
+        }
+
+        const bookDir = path.join(UPLOAD_ROOT, bookId);
+        let thumbnailRel = `assets/books/${bookId}/thumbnail.jpg`;
+        const videoRel = files['video_thumbnail'] ? `assets/books/${bookId}/${files['video_thumbnail'][0].filename}` : null;
+        const descRel = files['desc_file'] ? `assets/books/${bookId}/${files['desc_file'][0].filename}` : null;
+        let epubRel = `assets/books/${bookId}/book.epub`;
+        let previewRel = `assets/books/${bookId}/preview.epub`;
+
+        try {
+            // 🌟 원본 EPUB이 새로 업로드된 경우 자동 가공 파이프라인 수행
+            if (epubFileObj) {
+                const epubBuffer = fs.readFileSync(epubFileObj.path);
+                const zip = await JSZip.loadAsync(epubBuffer);
+
+                // 이미지 파일 추출 및 정렬
+                const imagePaths = Object.keys(zip.files)
+                    .filter((p) => !zip.files[p].dir && /\.(jpg|jpeg|png|webp)$/i.test(p))
+                    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+                if (imagePaths.length === 0) {
+                    throw new Error('EPUB 내부에 이미지 파일이 존재하지 않습니다.');
+                }
+
+                // 1. [표지 자동 생성] 첫 번째 페이지 이미지를 추출하여 thumbnail.jpg로 저장
+                const firstImageBuffer = await zip.file(imagePaths[0]).async('nodebuffer');
+                fs.writeFileSync(path.join(bookDir, 'thumbnail.jpg'), firstImageBuffer);
+
+                // 2. [5페이지 맛보기 자동 생성] 5페이지(인덱스 5) 이후 이미지를 1x1 백색 더미로 치환
+                const previewZip = await JSZip.loadAsync(epubBuffer);
+                for (let i = 5; i < imagePaths.length; i++) {
+                    previewZip.file(imagePaths[i], BLANK_DUMMY_IMAGE);
+                }
+
+                const previewBuffer = await previewZip.generateAsync({
+                    type: 'nodebuffer',
+                    compression: 'DEFLATE',
+                    compressionOptions: { level: 6 }
+                });
+                fs.writeFileSync(path.join(bookDir, 'preview.epub'), previewBuffer);
+            }
+
+            // DB 등록 및 갱신
+            db.prepare(`
+                INSERT INTO books (id, title, author, publisher, price, original_price, desc, description_url, thumbnail, video_thumbnail, epub_url, preview_epub_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    title=excluded.title, author=excluded.author, publisher=excluded.publisher,
+                    price=excluded.price, original_price=excluded.original_price, desc=excluded.desc,
+                    description_url=COALESCE(excluded.description_url, books.description_url),
+                    thumbnail=excluded.thumbnail,
+                    video_thumbnail=COALESCE(excluded.video_thumbnail, books.video_thumbnail),
+                    epub_url=excluded.epub_url,
+                    preview_epub_url=excluded.preview_epub_url
+            `).run(
+                bookId, title, author, publisher || '', Number(price) || 0,
+                original_price ? Number(original_price) : null, desc || '', descRel,
+                thumbnailRel, videoRel, epubRel, previewRel
+            );
+
+            res.json({
+                success: true,
+                message: '도서 등록, 첫 장 표지 추출 및 5페이지 맛보기 파일 생성이 완료되었습니다.',
+                bookId
+            });
+        } catch (processErr) {
+            console.error('EPUB 처리 중 에러:', processErr);
+            res.status(500).json({ error: `EPUB 가공 처리 실패: ${processErr.message}` });
+        }
+    });
 });
 
 app.post('/api/admin/books', authenticateAdmin, (req, res) => {

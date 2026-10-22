@@ -14,7 +14,7 @@
     }
 
     let books = $state<BookRecord[]>([]);
-    let isLoading = $state(false);
+    let isSubmitting = $state(false);
 
     let id = $state("");
     let title = $state("");
@@ -24,21 +24,19 @@
     let originalPrice = $state<number>(13000);
     let desc = $state("");
 
-    let thumbnailFile: File | null = null;
+    // 🌟 표지 및 맛보기 필드 제거, 3종류만 유지
     let videoFile: File | null = null;
     let descFile: File | null = null;
     let epubFile: File | null = null;
-    let previewEpubFile: File | null = null;
 
     async function loadBooks() {
-        isLoading = true;
         try {
             const res = await fetch("http://localhost:3000/api/admin/books", {
                 headers: { Authorization: `Bearer ${adminToken}` },
             });
             books = await res.json();
-        } finally {
-            isLoading = false;
+        } catch (e) {
+            console.error(e);
         }
     }
 
@@ -47,6 +45,12 @@
     });
 
     async function handleSubmit() {
+        if (!epubFile) {
+            alert("정식 원본 EPUB 파일을 선택해 주세요.");
+            return;
+        }
+
+        isSubmitting = true;
         const formData = new FormData();
         formData.append("id", id);
         formData.append("title", title);
@@ -56,12 +60,9 @@
         formData.append("original_price", String(originalPrice));
         formData.append("desc", desc);
 
-        if (thumbnailFile) formData.append("thumbnail", thumbnailFile);
+        formData.append("epub_file", epubFile);
         if (videoFile) formData.append("video_thumbnail", videoFile);
         if (descFile) formData.append("desc_file", descFile);
-        if (epubFile) formData.append("epub_file", epubFile);
-        if (previewEpubFile)
-            formData.append("preview_epub_file", previewEpubFile);
 
         try {
             const res = await fetch("http://localhost:3000/api/admin/books", {
@@ -72,15 +73,22 @@
             const result = await res.json();
             if (!res.ok) throw new Error(result.error);
 
-            alert("도서가 성공적으로 업로드 및 등록되었습니다.");
+            alert(
+                "도서가 등록되었습니다.\n(첫 장 표지 추출 및 5페이지 맛보기 파일이 자동 생성되었습니다)",
+            );
             id = "";
             title = "";
             author = "";
             publisher = "";
             desc = "";
+            videoFile = null;
+            descFile = null;
+            epubFile = null;
             loadBooks();
         } catch (err: any) {
             alert(`등록 실패: ${err.message}`);
+        } finally {
+            isSubmitting = false;
         }
     }
 
@@ -105,7 +113,15 @@
 
 <div class="tab-books">
     <section class="card upload-section">
-        <h3>새 전자책 업로드 및 메타데이터 등록</h3>
+        <h3>도서 등록 (원본 EPUB 1개로 자동 가공)</h3>
+        <p class="guide-desc">
+            정식 원본 EPUB 1개만 업로드하면, <strong
+                >첫 번째 장을 표지 이미지로 자동 추출</strong
+            >하고
+            <strong>5페이지 이후를 백지화한 맛보기 파일이 자동 생성</strong
+            >됩니다.
+        </p>
+
         <form
             onsubmit={(e) => {
                 e.preventDefault();
@@ -156,18 +172,18 @@
             </div>
 
             <div class="file-uploads-grid">
-                <label>
-                    <span>표지 이미지 (.jpg/.png)*</span>
+                <label class="highlight">
+                    <span>🌟 정식 원본 EPUB (.epub)* [필수]</span>
                     <input
                         type="file"
-                        accept="image/*"
+                        accept=".epub"
                         onchange={(e) =>
-                            (thumbnailFile =
-                                e.currentTarget.files?.[0] || null)}
+                            (epubFile = e.currentTarget.files?.[0] || null)}
+                        required
                     />
                 </label>
                 <label>
-                    <span>영상 표지 (.mp4, 선택)</span>
+                    <span>영상 표지 (.mp4, 선택 옵션)</span>
                     <input
                         type="file"
                         accept="video/mp4"
@@ -176,7 +192,7 @@
                     />
                 </label>
                 <label>
-                    <span>상세 소개 본문 (.txt, 선택)</span>
+                    <span>작품 상세 소개글 (.txt, 선택 옵션)</span>
                     <input
                         type="file"
                         accept=".txt"
@@ -184,30 +200,13 @@
                             (descFile = e.currentTarget.files?.[0] || null)}
                     />
                 </label>
-                <label class="highlight">
-                    <span>🌟 정식 원본 EPUB (.epub)*</span>
-                    <input
-                        type="file"
-                        accept=".epub"
-                        onchange={(e) =>
-                            (epubFile = e.currentTarget.files?.[0] || null)}
-                    />
-                </label>
-                <label class="highlight">
-                    <span>🌟 5페이지 맛보기 EPUB (.epub, 선택)</span>
-                    <input
-                        type="file"
-                        accept=".epub"
-                        onchange={(e) =>
-                            (previewEpubFile =
-                                e.currentTarget.files?.[0] || null)}
-                    />
-                </label>
             </div>
 
-            <button type="submit" class="btn-submit"
-                >도서 등록 및 파일 업로드 시작</button
-            >
+            <button type="submit" class="btn-submit" disabled={isSubmitting}>
+                {isSubmitting
+                    ? "EPUB 분석 및 자동 생성 중..."
+                    : "도서 등록 및 자동 가공 실행"}
+            </button>
         </form>
     </section>
 
@@ -242,9 +241,11 @@
                             <td>{b.price.toLocaleString()}원</td>
                             <td>
                                 {#if b.preview_epub_url}
-                                    <span class="badge green">5p 준비됨</span>
+                                    <span class="badge green"
+                                        >자동 생성 완료</span
+                                    >
                                 {:else}
-                                    <span class="badge gray">미등록</span>
+                                    <span class="badge gray">생성 대기</span>
                                 {/if}
                             </td>
                             <td>
@@ -287,9 +288,15 @@
         box-sizing: border-box;
     }
     h3 {
-        margin: 0 0 16px 0;
+        margin: 0 0 6px 0;
         font-size: 15px;
         color: #e1e1e8;
+    }
+    .guide-desc {
+        margin: 0 0 16px 0;
+        font-size: 13px;
+        color: #8e8e9a;
+        line-height: 1.5;
     }
 
     .form-grid {
@@ -316,7 +323,7 @@
 
     .file-uploads-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         gap: 10px;
         margin-bottom: 18px;
     }
@@ -327,7 +334,7 @@
         font-size: 12px;
         color: #aaa;
         background: #1e1e26;
-        padding: 10px;
+        padding: 12px;
         border-radius: 8px;
         border: 1px dashed #3a3a4c;
         box-sizing: border-box;
@@ -354,8 +361,11 @@
         cursor: pointer;
         font-size: 14px;
     }
+    .btn-submit:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
 
-    /* 🌟 반응형 테이블 가로 스크롤 컨테이너 */
     .table-scroll-wrap {
         width: 100%;
         overflow-x: auto;
