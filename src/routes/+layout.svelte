@@ -2,13 +2,11 @@
   import favicon from "$lib/assets/favicon.svg";
   import { onMount } from "svelte";
   import "../app.css";
-  import { indexed } from "$lib/services/indexed.svelte";
   import { initLanguage } from "$lib/services/language.svelte";
 
   let { children } = $props();
 
   onMount(() => {
-    indexed.initialize();
     initLanguage();
   });
 </script>

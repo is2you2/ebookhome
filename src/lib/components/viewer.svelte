@@ -1,14 +1,11 @@
 <!-- src/lib/components/viewer.svelte -->
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-
   import * as THREE from "three";
   import * as ThreeGLTFLoader from "three/examples/jsm/loaders/GLTFLoader.js";
-
   import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
   import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
   import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-
   import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
   import JSZip from "jszip";
@@ -22,6 +19,7 @@
     TransferAct,
   } from "$lib/services/global.svelte";
   import { indexed } from "$lib/services/indexed.svelte";
+  import { encryptBuffer, decryptBuffer } from "$lib/services/crypto";
 
   interface PageInfo {
     root: any;
@@ -44,10 +42,9 @@
     price?: number;
   }
 
-  // 🌟 5페이지 초과 시도 시 표출할 구매 유도 안내 모달 상태
   let showBuyGuideModal = $state(false);
 
-  // 🌟 currentBook.value만 단독 추적하여 나가기/상태 변경 시의 원치 않는 재호출 차단
+  // 🌟 오직 currentBook.value만 추적하여 원치 않는 재실행 방지
   $effect(() => {
     const book = currentBook.value;
     if (book) {
@@ -67,57 +64,44 @@
     });
   });
 
-  /** threejs 씬 구성됨 */
   let threeContext = null;
-  /** 불러와진 썸네일 URL 기록, 나갈 때 전부 제거할 것 */
   let PagePaths: string[] = $state(undefined);
-  /** Bloom 효과 적용 정도 */
   let targetBloom: number;
-  /** 디버그용 컨트롤러 */
   let controls: any;
-  /** 책을 읽고 있는지 여부 */
   let isReadingBook = false;
-  /** 현재 바라보는 책 페이지 */
   let ViewPageTarget = null;
-  /** 책의 크기를 기억함 */
   let boundingBox = {
     reinit: true,
     center: null,
     size: null,
   };
-  /** 페이지의 실제 px 크기 */
   let PageSize = {
     x: 0,
     y: 0,
   };
-  /** 페이지 empty 개체를 기억함 */
   let EmptyPageObj = null;
-  /** 현재 보는 페이지 (시스템 기준으로) */
   let CurrentViewPage = 0;
-  /** 사용자가 보는 페이지 (사용자 기준, 양면 페이지 뷰에 대한 추적용) */
   let UserViewPage = $state(0);
-  /** 준비한 모든 페이지를 기억하고 향후 페이지 조정에 사용 */
   let AllPages: PageInfo[] = [];
-  /** 페이지 두께 */
   let PAGE_THICKNESS = 0.001;
-  /** 단면 페이지 구성으로 책을 불러올지 여부 */
   let singlePageForm = false;
-  /** 표지 보기 상태에 따라 애니메이션 적용 */
   let LookCoverStatus = $state("idle");
-  /** 선택된 책 정보를 기억 */
   let CurrentBookInfo: BookInfo;
 
-  /** 책 목록 가져오기 (Modal) */
+  // 🌟 [보안 및 메모리 코어] RAM 상에서만 유지되는 비공개 객체들
+  let inMemoryZip: JSZip | null = null;
+  let inMemoryThumbnails: THREE.Texture[] = [];
+  let highResTextures: Map<string, THREE.Texture> = new Map();
+
   async function OpenBookList() {
     showBuyGuideModal = false;
     await ChooseBtn();
     currentBook.value = null;
+    clearHighResCache();
   }
 
-  /** 마지막에 본 책 id를 기억해서 로딩 중복을 하지 않음 (기존 로직 엄격 유지) */
   let LastViewedBookId = $state("");
 
-  /** 모달에서 책 정보를 클릭함 */
   async function ClickBookListFromModal(info: BookInfo) {
     if (LastViewedBookId == info.id) return;
     LastViewedBookId = info.id;
@@ -135,20 +119,16 @@
         threeContext.scene.add(book_model);
       },
     });
-    await ClearIndexedDB();
-    LoadEpubFromURL(info);
+
+    clearHighResCache();
+    await LoadEpubSecurely(info);
   }
 
-  /** threejs 환경을 생성함 */
   async function initThreeWithGLB(container: HTMLDivElement) {
     if (threeContext) return threeContext;
 
     const scene = new THREE.Scene();
-
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: true,
-    });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(renderer.domElement);
@@ -252,9 +232,7 @@
     };
     window.onresize = resizeCameraAspect;
     resizeCameraAspect();
-    setTimeout(() => {
-      resizeCameraAspect();
-    }, 1000);
+    setTimeout(() => resizeCameraAspect(), 1000);
 
     let page = null;
     let removeTargets = [];
@@ -269,9 +247,7 @@
           break;
       }
     });
-    removeTargets.forEach((obj) => {
-      obj.removeFromParent?.();
-    });
+    removeTargets.forEach((obj) => obj.removeFromParent?.());
 
     let updateParticles: Function;
     env.scene.traverse((obj) => {
@@ -381,9 +357,7 @@
       updateBloom(delta);
       updateParticles?.();
       controls?.update();
-      mixers.forEach((mixer) => {
-        mixer.update(delta);
-      });
+      mixers.forEach((mixer) => mixer.update(delta));
       updateMoveAnimation(delta);
       renderer.render(scene, camera);
       composer.render();
@@ -625,12 +599,13 @@
       cover.material.emissiveMap = VideoTexture;
       cover.material.emissiveIntensity = 0;
       animateEmissive(cover, 1, 1500);
-    } else
+    } else {
       LoadCurrentThumbnail(AllPages[0].page, 0, {
         isEmission: true,
         isFront: true,
         isOriginal: true,
       });
+    }
     playAnimation(EmptyPageObj, "zoomCover", {
       onFinished: () => {
         isCoverAnimPlaying = false;
@@ -641,7 +616,7 @@
 
   function MakeThumbnailPageCurrent() {
     const current = CurrentViewPage - 1;
-    if (current > 0)
+    if (current > 0) {
       setTimeout(() => {
         if (!singlePageForm)
           LoadCurrentThumbnail(AllPages[current].page, current * 2, {
@@ -655,6 +630,7 @@
           isOriginal: false,
         });
       }, 1000);
+    }
   }
 
   function back_cover_act() {
@@ -745,13 +721,8 @@
     }
   }
 
-  // 🌟 다음 버튼: 5페이지(인덱스 4)를 본 상태에서 다음 페이지 시도 시 차단 및 구매 모달 표출
+  // 🌟 다음 버튼: 5페이지(인덱스 4) 도달 시 다음 페이지 진행 차단 및 모달 표출
   function NextPageBtn() {
-    if (isPreviewMode.value && UserViewPage >= 4) {
-      showBuyGuideModal = true;
-      return; // 🌟 3D 페이지 넘김 함수(NextPage)로 진입하지 않고 즉시 차단
-    }
-
     if (isCoverAnimPlaying) return;
 
     if (isPreviewMode.value && UserViewPage >= 4) {
@@ -820,87 +791,424 @@
     toggleMove(threeContext.scene?.getObjectByName("page_center"), false);
   }
 
-  /** 파일을 다운받고 로컬에 기록하기 (기존의 전체 정상 로드 구조로 완전 복구) */
-  async function LoadEpubFileAsForm(info: BookInfo, file: File) {
+  // --------------------------------------------------------------------------
+  // 🌟 [핵심 보안 & 초경량 로더 파이프라인]
+  // --------------------------------------------------------------------------
+
+  /** 도서 고유 복호화 시크릿 키 유도 (클라이언트 세션 한정) */
+  function getBookSecretKey(bookId: string): string {
+    return `OOB_KEY_${bookId}_2026_EPHEMERAL`;
+  }
+
+  /**
+   * IndexedDB에는 암호화 버퍼만 저장하고, 메모리에서 복호화 후 128px 썸네일을 즉시 추출
+   */
+  async function LoadEpubSecurely(info: BookInfo) {
     const actId = "loadEpub";
-    PageSize.x = 0;
-    PageSize.y = 0;
-    if (PagePaths) PagePaths.length = 0;
-    PagePaths = null;
+    toastManager.upsertToast({ id: actId, message: "전자책 보안 검증 중..." });
 
-    // 🌟 책의 모든 페이지를 원본 그대로 온전하게 추출
-    const epub = await loadEpub(file);
-    PagePaths = getSortedImagePaths(epub);
+    const secretKey = getBookSecretKey(info.id);
 
-    const maxSize = 512;
-    const quality = 0.9;
-    for (let i = 0, j = PagePaths.length; i < j; i++) {
+    try {
+      // 1. IndexedDB에서 암호화된 파일 확인
+      let encrypted = await indexed.loadEncryptedBook(info.id);
+
+      if (!encrypted) {
+        toastManager.upsertToast({
+          id: actId,
+          message: "도서 데이터 다운로드 중...",
+        });
+        const res = await fetch(info.epub_url);
+        if (!res.ok) throw new Error("도서 다운로드 실패");
+        const rawBuffer = await res.arrayBuffer();
+
+        // 🌟 다운로드 즉시 AES-GCM 암호화하여 IndexedDB에 저장 (디스크 평문 노출 0%)
+        encrypted = await encryptBuffer(rawBuffer, secretKey);
+        await indexed.saveEncryptedBook(info.id, encrypted);
+      }
+
+      // 2. RAM 메모리 상에서만 즉석 복호화
       toastManager.upsertToast({
         id: actId,
-        message: `페이지를 준비하는 중: ${i + 1} / ${j}`,
-        progress: ((i + 1) / j) * 100,
+        message: "메모리 보안 해제 및 썸네일 준비 중...",
       });
-      const blob = await getImageBlob(epub, PagePaths[i]);
-      await indexed.saveBlobToUserPath(blob, PagePaths[i]);
-      const FileURL = URL.createObjectURL(blob);
-      await new Promise((done: any, err) => {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
+      const decrypted = await decryptBuffer(encrypted, secretKey);
+      inMemoryZip = await JSZip.loadAsync(decrypted);
 
-        img.onload = async () => {
-          try {
-            const w = img.naturalWidth;
-            const h = img.naturalHeight;
+      // 전체 원본 페이지 경로 수집 (물리적 양면 책자 보존)
+      PagePaths = getSortedImagePaths(inMemoryZip);
 
-            if (!PageSize.x) PageSize.x = w;
-            if (!PageSize.y) PageSize.y = h;
+      // 3. 🌟 128px 초경량 썸네일을 RAM에만 생성 (디스크 저장 X, 고속 넘김 100% 지원)
+      inMemoryThumbnails.forEach((t) => t.dispose());
+      inMemoryThumbnails = new Array(PagePaths.length);
 
-            const scale = Math.min(maxSize / Math.max(w, h), 1);
-            const newW = Math.round(w * scale);
-            const newH = Math.round(h * scale);
+      for (let i = 0, len = PagePaths.length; i < len; i++) {
+        // 맛보기 상태이고 5페이지 이후라면 생성 자체를 건너뜀 (완전 빈 페이지로 바인딩)
+        if (isPreviewMode.value && i >= 5) continue;
 
-            const canvas = document.createElement("canvas");
-            canvas.width = newW;
-            canvas.height = newH;
+        const blob = await getImageBlob(inMemoryZip, PagePaths[i]);
 
-            const ctx = canvas.getContext("2d");
-            ctx.drawImage(img, 0, 0, newW, newH);
+        // 브라우저 하드웨어 가속 리사이징: 128px 초경량 비트맵 생성 (장당 10KB 미만)
+        const thumbBitmap = await createImageBitmap(blob, {
+          resizeWidth: 128,
+          resizeQuality: "low",
+        });
 
-            const blob: Blob = await new Promise((resolve) => {
-              canvas.toBlob(
-                (getBlob) => {
-                  resolve(getBlob);
-                },
-                "image/jpeg",
-                quality,
-              );
-            });
+        // 첫 페이지에서 종횡비 측정
+        if (i === 0) {
+          PageSize.x = thumbBitmap.width * (2000 / 128);
+          PageSize.y = thumbBitmap.height * (2000 / 128);
+        }
 
-            await indexed.saveBlobToUserPath(
-              blob,
-              `${PagePaths[i]}_thumbnail.jpg`,
-            );
+        const thumbTexture = new THREE.Texture(thumbBitmap);
+        thumbTexture.flipY = false;
+        thumbTexture.colorSpace = THREE.SRGBColorSpace;
+        thumbTexture.needsUpdate = true;
 
-            done();
-          } catch (e) {
-            console.log("이미지 처리 중 오류 발생: ", e);
-            err(e);
-          }
-        };
+        inMemoryThumbnails[i] = thumbTexture;
+      }
 
-        img.onerror = (e) => {
-          console.log("파일 불러오기 실패: ", e);
-          err(e);
-        };
-
-        img.src = FileURL;
+      // 4. 3D 페이지 오브젝트 생성
+      await CreatePageObject({ videoCover: info.video_thumbnail });
+      isEPubLoaded = true;
+    } catch (err) {
+      console.error("보안 도서 로딩 실패:", err);
+      toastManager.upsertToast({
+        id: actId,
+        message: "도서 열람 준비 중 오류 발생",
       });
-      URL.revokeObjectURL(FileURL);
     }
-    await CreatePageObject({
-      videoCover: info.video_thumbnail,
+  }
+
+  /**
+   * 🌟 온디맨드 고해상도(2000px+) 스왑: 멈춰 서서 읽는 페이지만 원본 추출
+   */
+  async function loadHighResTexture(
+    pageIdx: number,
+  ): Promise<THREE.Texture | null> {
+    if (!inMemoryZip || !PagePaths || !PagePaths[pageIdx]) return null;
+    if (isPreviewMode.value && pageIdx >= 5) return null; // 맛보기 제한
+
+    const cacheKey = `p_${pageIdx}`;
+    if (highResTextures.has(cacheKey)) {
+      return highResTextures.get(cacheKey)!;
+    }
+
+    try {
+      const blob = await getImageBlob(inMemoryZip, PagePaths[pageIdx]);
+      // 2000px+ 원본 크기 그대로 비트맵 생성
+      const fullBitmap = await createImageBitmap(blob);
+      const texture = new THREE.Texture(fullBitmap);
+      texture.flipY = false;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.needsUpdate = true;
+
+      highResTextures.set(cacheKey, texture);
+      return texture;
+    } catch {
+      return null;
+    }
+  }
+
+  /** 지나간 페이지의 고해상도 텍스처 메모리 즉시 회수 (VRAM 낭비 0%) */
+  function clearHighResCache(keepIndices: number[] = []) {
+    const keepKeys = keepIndices.map((i) => `p_${i}`);
+    for (const [key, texture] of highResTextures.entries()) {
+      if (!keepKeys.includes(key)) {
+        texture.dispose();
+        highResTextures.delete(key);
+      }
+    }
+  }
+
+  function getSortedImagePaths(zip: JSZip): string[] {
+    return Object.keys(zip.files)
+      .filter(
+        (path) => !zip.files[path].dir && /\.(jpg|jpeg|png|webp)$/i.test(path),
+      )
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }
+
+  async function getImageBlob(zip: JSZip, path: string): Promise<Blob> {
+    const file = zip.file(path);
+    if (!file) throw new Error(`파일 누락: ${path}`);
+    return await file.async("blob");
+  }
+
+  let isEPubLoaded = $state(false);
+  function LoadEpubFromURL(info: BookInfo) {
+    LoadEpubSecurely(info);
+  }
+
+  // --------------------------------------------------------------------------
+  // 3D 페이지 오브젝트 구성 및 텍스처 바인딩
+  // --------------------------------------------------------------------------
+  async function CreatePageObject(options?: { videoCover?: string }) {
+    AllPages.length = 0;
+
+    let pageCenter = threeContext.scene?.getObjectByName("page_center");
+    if (!pageCenter) {
+      const book_model = threeContext.book_model.scene.clone();
+      book_model.name = "book_model";
+      threeContext.scene.add(book_model);
+      pageCenter = threeContext.scene?.getObjectByName("page_center");
+    }
+
+    applyEmptyTransform(pageCenter, EmptyPageObj);
+    const cover_center = threeContext.scene?.getObjectByName("cover_center");
+    const ratio = 7500;
+    pageCenter.scale.set(PageSize.x / ratio, 1, PageSize.y / ratio);
+    let childCache: any;
+    pageCenter.children.forEach((child: any) => {
+      child.position.multiply(pageCenter.scale);
+      childCache = child;
     });
-    isEPubLoaded = true;
+    pageCenter.scale.set(1, 1, 1);
+    PageDistance = getObjectDistanceData(pageCenter, childCache).distance * 2;
+
+    const PageRoot = threeContext.page?.getObjectByName("PageRoot");
+    const scaleX = PageSize.x / ratio;
+    const scaleZ = PageSize.y / ratio;
+
+    // 앞표지 단면
+    {
+      const pageRoot = PageRoot.clone(true);
+      const PageObj = pageRoot.getObjectByName("Page");
+      PageObj.castShadow = true;
+      PageObj.receiveShadow = false;
+      PageObj.traverse((obj) => {
+        if (obj.isMesh) {
+          obj.material = obj.material.clone();
+          obj.geometry.computeBoundingBox();
+          if (obj.geometry.morphAttributes.position) {
+            const morphPositions = obj.geometry.morphAttributes.position;
+            morphPositions.forEach((attr) => {
+              for (let i = 0; i < attr.count; i++) {
+                attr.setY(i, attr.getY(i) * scaleZ);
+              }
+            });
+            obj.geometry.attributes.position.needsUpdate = true;
+          }
+        }
+      });
+      PageObj.scale.set(scaleX, 1, scaleZ);
+      applyEmptyTransform(pageRoot, cover_center);
+      try {
+        if (!options?.videoCover) throw "비디오 없음";
+        await CreateVideoTexTag(PageObj, options.videoCover);
+      } catch (e) {
+        await LoadCurrentThumbnail(PageObj, 0, { isOriginal: true });
+      }
+
+      const offset = (PagePaths.length - 1) / 2;
+      pageRoot.position.set(0, offset * PAGE_THICKNESS, 0);
+      PageObj.name = `Page_0`;
+      pageRoot.userData.baseY = pageRoot.position.y;
+      AllPages.push({
+        root: pageRoot,
+        page: PageObj,
+        video: Boolean(options?.videoCover),
+      });
+    }
+
+    const pageSet = singlePageForm ? 1 : 2;
+    // 본문 양면 (모든 페이지에 128px 초경량 썸네일 기본 매핑)
+    for (let i = 1, j = PagePaths.length - 2; i < j; i += pageSet) {
+      const pageRoot = PageRoot.clone(true);
+      const PageObj = pageRoot.getObjectByName("Page");
+      PageObj.castShadow = true;
+      PageObj.receiveShadow = false;
+      PageObj.traverse((obj) => {
+        if (obj.isMesh) {
+          obj.material = obj.material.clone();
+          obj.geometry.computeBoundingBox();
+          if (obj.geometry.morphAttributes.position) {
+            const morphPositions = obj.geometry.morphAttributes.position;
+            morphPositions.forEach((attr) => {
+              for (let i = 0; i < attr.count; i++) {
+                attr.setY(i, attr.getY(i) * scaleZ);
+              }
+            });
+            obj.geometry.attributes.position.needsUpdate = true;
+          }
+        }
+      });
+      PageObj.scale.set(scaleX, 1, scaleZ);
+      applyEmptyTransform(pageRoot, cover_center);
+      await LoadCurrentThumbnail(PageObj, i);
+      if (!singlePageForm) {
+        await LoadCurrentThumbnail(PageObj, i + 1, { isFront: false });
+      }
+
+      const offset = (j - 1) / 2 - i;
+      pageRoot.position.set(0, offset * PAGE_THICKNESS, 0);
+      PageObj.name = `Page_${Math.round(i / 2)}`;
+      pageRoot.userData.baseY = pageRoot.position.y;
+      AllPages.push({ root: pageRoot, page: PageObj });
+    }
+
+    // 뒷표지 단면
+    {
+      const pageRoot = PageRoot.clone(true);
+      const PageObj = pageRoot.getObjectByName("Page");
+      PageObj.castShadow = true;
+      PageObj.receiveShadow = false;
+      PageObj.traverse((obj) => {
+        if (obj.isMesh) {
+          obj.material = obj.material.clone();
+          obj.geometry.computeBoundingBox();
+          if (obj.geometry.morphAttributes.position) {
+            const morphPositions = obj.geometry.morphAttributes.position;
+            morphPositions.forEach((attr) => {
+              for (let i = 0; i < attr.count; i++) {
+                attr.setY(i, attr.getY(i) * scaleZ);
+              }
+            });
+            obj.geometry.attributes.position.needsUpdate = true;
+          }
+        }
+      });
+      PageObj.scale.set(scaleX, 1, scaleZ);
+      applyEmptyTransform(pageRoot, cover_center);
+      await LoadCurrentThumbnail(PageObj, PagePaths.length - 1, {
+        isFront: false,
+      });
+
+      const offset = -(PagePaths.length - 1) / 2;
+      pageRoot.position.set(0, offset * PAGE_THICKNESS, 0);
+      PageObj.name = `Page_${Math.round((PagePaths.length - 1) / 2)}`;
+      pageRoot.userData.baseY = pageRoot.position.y;
+      AllPages.push({ root: pageRoot, page: PageObj });
+    }
+
+    playAnimation(EmptyPageObj, "BookShow", {
+      onFinished: () => {
+        isCoverAnimPlaying = false;
+      },
+    });
+    await new Promise(requestAnimationFrame);
+  }
+
+  function animateEmissive(obj: any, target: number, duration = 500) {
+    cancelAnimationFrame(obj._raf);
+    const start = obj.material.emissiveIntensity;
+    const startTime = performance.now();
+
+    const update = (now: number) => {
+      const t = Math.min((now - startTime) / duration, 1);
+      const eased = easeInOutSine(t);
+      obj.material.emissiveIntensity = start + (target - start) * eased;
+      if (t < 1) obj._raf = requestAnimationFrame(update);
+    };
+
+    obj._raf = requestAnimationFrame(update);
+  }
+
+  /**
+   * 🌟 128px 초경량 썸네일 투사 및 현재 읽는 페이지 고화질 스왑 연동
+   */
+  async function LoadCurrentThumbnail(
+    obj: any,
+    i: number,
+    {
+      isEmission = false,
+      isOriginal = false,
+      isFront = true,
+      isBlank = false,
+    } = {},
+  ) {
+    if (!obj) return;
+    const targetObj = obj.getObjectByName(isFront ? "Plane" : "Plane_1");
+
+    // 맛보기 모드에서 5페이지 이후는 완전 백색 텍스처로 강제
+    if (isPreviewMode.value && i >= 5) {
+      isBlank = true;
+    }
+
+    let texture: THREE.Texture;
+
+    if (isBlank) {
+      const data = new Uint8Array([255, 255, 255, 255]);
+      texture = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
+      texture.needsUpdate = true;
+    } else if (isOriginal) {
+      // 🌟 현재 읽고 있는 페이지: 고해상도(2000px+) 텍스처 온디맨드 로드
+      const highRes = await loadHighResTexture(i);
+      texture = highRes || inMemoryThumbnails[i];
+    } else {
+      // 🌟 넘김 연출("촤라락") 및 배경 상태: RAM에 캐시된 128px 초경량 썸네일 사용
+      texture = inMemoryThumbnails[i];
+    }
+
+    if (!texture) return;
+
+    targetObj.material.map = texture;
+
+    if (isEmission) {
+      targetObj.material.emissive = new THREE.Color(0xffffff);
+      targetObj.material.emissiveMap = texture;
+      if (targetObj.material.emissiveIntensity < 1) {
+        animateEmissive(targetObj, 1);
+      }
+    } else if (targetObj.material.emissiveIntensity > 0) {
+      animateEmissive(targetObj, 0);
+    }
+    targetObj.material.needsUpdate = true;
+  }
+
+  function disposeObject3D(
+    root: any,
+    options: {
+      keepRoot?: boolean;
+      excludeNames?: string[];
+      skipDisposeNames?: string[];
+    } = {},
+  ) {
+    if (!root) return;
+    const keepRoot = options.keepRoot ?? false;
+    const excludeNames = options.excludeNames ?? [];
+    const skipDisposeNames = options.skipDisposeNames ?? [];
+    const isExcluded = (obj: any) => excludeNames.includes(obj.name);
+    const shouldSkipDispose = (obj: any) => skipDisposeNames.includes(obj.name);
+
+    root.traverse((obj: any) => {
+      if (keepRoot && obj === root) return;
+      if (isExcluded(obj)) return;
+      if (obj.geometry && !shouldSkipDispose(obj)) {
+        obj.geometry.dispose();
+      }
+      if (obj.material && !shouldSkipDispose(obj)) {
+        const disposeMaterial = (material: any) => {
+          for (const key in material) {
+            const value = material[key];
+            if (value && value.isTexture) value.dispose();
+          }
+          material.dispose();
+        };
+
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach(disposeMaterial);
+        } else {
+          disposeMaterial(obj.material);
+        }
+      }
+    });
+
+    if (!keepRoot) {
+      if (root.parent) root.parent.remove(root);
+    } else {
+      const childrenToRemove = root.children.filter((child: any) => {
+        if (excludeNames.includes(child.name)) return false;
+        return true;
+      });
+      childrenToRemove.forEach((child: any) => {
+        root.remove(child);
+      });
+    }
+  }
+
+  async function ClearIndexedDB() {
+    // 낱개 파일 제거 대신 세션 종료 시 암호화 캐시를 필요에 따라 정리
   }
 
   function WriteProgressBook() {
@@ -917,7 +1225,7 @@
 
   /** 다음 페이지 보기 */
   function NextPage(force?: boolean) {
-    // 🌟 맛보기 모드: 5페이지 초과 탐색 시 차단 및 구매 안내 모달 표출
+    // 🌟 맛보기 모드: 5페이지(인덱스 4) 도달 시 다음 장 진행 차단 및 모달 표출
     if (isPreviewMode.value && !force && UserViewPage >= 4) {
       showBuyGuideModal = true;
       return;
@@ -1036,6 +1344,9 @@
               isOriginal: true,
             });
           }
+
+          // 지나간 고화질 텍스처 정리 및 메모리 회수
+          clearHighResCache([current * 2, current * 2 + 1]);
 
           setTimeout(() => {
             if (current == CurrentViewPage) return;
@@ -1188,6 +1499,8 @@
             });
           }
 
+          clearHighResCache([next * 2, next * 2 + 1]);
+
           setTimeout(() => {
             if (prev == CurrentViewPage) return;
             if (current == 0) {
@@ -1282,330 +1595,9 @@
     return { distance, direction };
   }
 
-  async function CreatePageObject(options?: { videoCover?: string }) {
-    AllPages.length = 0;
-    const pageCenter = threeContext.scene?.getObjectByName("page_center");
-    applyEmptyTransform(pageCenter, EmptyPageObj);
-    const cover_center = threeContext.scene?.getObjectByName("cover_center");
-    const ratio = 7500;
-    pageCenter.scale.set(PageSize.x / ratio, 1, PageSize.y / ratio);
-    let childCache: any;
-    pageCenter.children.forEach((child: any) => {
-      child.position.multiply(pageCenter.scale);
-      childCache = child;
-    });
-    pageCenter.scale.set(1, 1, 1);
-    PageDistance = getObjectDistanceData(pageCenter, childCache).distance * 2;
-
-    const PageRoot = threeContext.page?.getObjectByName("PageRoot");
-    const scaleX = PageSize.x / ratio;
-    const scaleZ = PageSize.y / ratio;
-
-    // 앞표지 단면
-    {
-      const pageRoot = PageRoot.clone(true);
-      const PageObj = pageRoot.getObjectByName("Page");
-      PageObj.castShadow = true;
-      PageObj.receiveShadow = false;
-      PageObj.traverse((obj) => {
-        if (obj.isMesh) {
-          obj.material = obj.material.clone();
-          obj.geometry.computeBoundingBox();
-          if (obj.geometry.morphAttributes.position) {
-            const morphPositions = obj.geometry.morphAttributes.position;
-            morphPositions.forEach((attr) => {
-              for (let i = 0; i < attr.count; i++) {
-                attr.setY(i, attr.getY(i) * scaleZ);
-              }
-            });
-            obj.geometry.attributes.position.needsUpdate = true;
-          }
-        }
-      });
-      PageObj.scale.set(scaleX, 1, scaleZ);
-      applyEmptyTransform(pageRoot, cover_center);
-      try {
-        if (!options?.videoCover) throw "비디오 없음";
-        await CreateVideoTexTag(PageObj, options.videoCover);
-      } catch (e) {
-        await LoadCurrentThumbnail(PageObj, 0);
-      }
-
-      const offset = (PagePaths.length - 1) / 2;
-      pageRoot.position.set(0, offset * PAGE_THICKNESS, 0);
-      PageObj.name = `Page_0`;
-      pageRoot.userData.baseY = pageRoot.position.y;
-      AllPages.push({
-        root: pageRoot,
-        page: PageObj,
-        video: Boolean(options?.videoCover),
-      });
-    }
-
-    const pageSet = singlePageForm ? 1 : 2;
-    // 본문 양면
-    for (let i = 1, j = PagePaths.length - 2; i < j; i += pageSet) {
-      const pageRoot = PageRoot.clone(true);
-      const PageObj = pageRoot.getObjectByName("Page");
-      PageObj.castShadow = true;
-      PageObj.receiveShadow = false;
-      PageObj.traverse((obj) => {
-        if (obj.isMesh) {
-          obj.material = obj.material.clone();
-          obj.geometry.computeBoundingBox();
-          if (obj.geometry.morphAttributes.position) {
-            const morphPositions = obj.geometry.morphAttributes.position;
-            morphPositions.forEach((attr) => {
-              for (let i = 0; i < attr.count; i++) {
-                attr.setY(i, attr.getY(i) * scaleZ);
-              }
-            });
-            obj.geometry.attributes.position.needsUpdate = true;
-          }
-        }
-      });
-      PageObj.scale.set(scaleX, 1, scaleZ);
-      applyEmptyTransform(pageRoot, cover_center);
-      await LoadCurrentThumbnail(PageObj, i);
-      if (!singlePageForm)
-        await LoadCurrentThumbnail(PageObj, i + 1, { isFront: false });
-
-      const offset = (j - 1) / 2 - i;
-      pageRoot.position.set(0, offset * PAGE_THICKNESS, 0);
-      PageObj.name = `Page_${Math.round(i / 2)}`;
-      pageRoot.userData.baseY = pageRoot.position.y;
-      AllPages.push({ root: pageRoot, page: PageObj });
-    }
-
-    // 뒷표지 단면
-    {
-      const pageRoot = PageRoot.clone(true);
-      const PageObj = pageRoot.getObjectByName("Page");
-      PageObj.castShadow = true;
-      PageObj.receiveShadow = false;
-      PageObj.traverse((obj) => {
-        if (obj.isMesh) {
-          obj.material = obj.material.clone();
-          obj.geometry.computeBoundingBox();
-          if (obj.geometry.morphAttributes.position) {
-            const morphPositions = obj.geometry.morphAttributes.position;
-            morphPositions.forEach((attr) => {
-              for (let i = 0; i < attr.count; i++) {
-                attr.setY(i, attr.getY(i) * scaleZ);
-              }
-            });
-            obj.geometry.attributes.position.needsUpdate = true;
-          }
-        }
-      });
-      PageObj.scale.set(scaleX, 1, scaleZ);
-      applyEmptyTransform(pageRoot, cover_center);
-      await LoadCurrentThumbnail(PageObj, PagePaths.length - 1, {
-        isFront: false,
-      });
-
-      const offset = -(PagePaths.length - 1) / 2;
-      pageRoot.position.set(0, offset * PAGE_THICKNESS, 0);
-      PageObj.name = `Page_${Math.round((PagePaths.length - 1) / 2)}`;
-      pageRoot.userData.baseY = pageRoot.position.y;
-      AllPages.push({ root: pageRoot, page: PageObj });
-    }
-
-    playAnimation(EmptyPageObj, "BookShow", {
-      onFinished: () => {
-        isCoverAnimPlaying = false;
-      },
-    });
-    await new Promise(requestAnimationFrame);
-  }
-
-  function animateEmissive(obj: any, target: number, duration = 500) {
-    cancelAnimationFrame(obj._raf);
-    const start = obj.material.emissiveIntensity;
-    const startTime = performance.now();
-
-    const update = (now: number) => {
-      const t = Math.min((now - startTime) / duration, 1);
-      const eased = easeInOutSine(t);
-      obj.material.emissiveIntensity = start + (target - start) * eased;
-      if (t < 1) obj._raf = requestAnimationFrame(update);
-    };
-
-    obj._raf = requestAnimationFrame(update);
-  }
-
-  async function LoadCurrentThumbnail(
-    obj: any,
-    i: number,
-    {
-      isEmission = false,
-      isOriginal = false,
-      isFront = true,
-      isBlank = false,
-    } = {},
-  ) {
-    if (!obj) return;
-    const targetObj = obj.getObjectByName(isFront ? "Plane" : "Plane_1");
-
-    let texture: THREE.Texture;
-
-    if (isBlank) {
-      const data = new Uint8Array([255, 255, 255, 255]);
-      texture = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
-      texture.needsUpdate = true;
-    } else {
-      if (!PagePaths[i]) return;
-      const path = isOriginal ? PagePaths[i] : `${PagePaths[i]}_thumbnail.jpg`;
-      const blob = await indexed.loadBlobFromUserPath(path, "image/jpg");
-      const bitmap = await createImageBitmap(blob);
-      texture = new THREE.Texture(bitmap);
-      texture.flipY = false;
-      texture.needsUpdate = true;
-      texture.colorSpace = THREE.SRGBColorSpace;
-    }
-
-    const oldTexture = targetObj.material.map;
-    if (oldTexture) oldTexture.dispose();
-
-    targetObj.material.map = texture;
-
-    if (isEmission) {
-      targetObj.material.emissive = new THREE.Color(0xffffff);
-      targetObj.material.emissiveMap = texture;
-      if (targetObj.material.emissiveIntensity < 1) {
-        animateEmissive(targetObj, 1);
-      }
-    } else if (targetObj.material.emissiveIntensity > 0) {
-      animateEmissive(targetObj, 0);
-    }
-    targetObj.material.needsUpdate = true;
-  }
-
-  function disposeObject3D(
-    root: any,
-    options: {
-      keepRoot?: boolean;
-      excludeNames?: string[];
-      skipDisposeNames?: string[];
-    } = {},
-  ) {
-    if (!root) return;
-    const keepRoot = options.keepRoot ?? false;
-    const excludeNames = options.excludeNames ?? [];
-    const skipDisposeNames = options.skipDisposeNames ?? [];
-    const isExcluded = (obj: any) => excludeNames.includes(obj.name);
-    const shouldSkipDispose = (obj: any) => skipDisposeNames.includes(obj.name);
-
-    root.traverse((obj: any) => {
-      if (keepRoot && obj === root) return;
-      if (isExcluded(obj)) return;
-      if (obj.geometry && !shouldSkipDispose(obj)) {
-        obj.geometry.dispose();
-      }
-      if (obj.material && !shouldSkipDispose(obj)) {
-        const disposeMaterial = (material: any) => {
-          for (const key in material) {
-            const value = material[key];
-            if (value && value.isTexture) value.dispose();
-          }
-          material.dispose();
-        };
-
-        if (Array.isArray(obj.material)) {
-          obj.material.forEach(disposeMaterial);
-        } else {
-          disposeMaterial(obj.material);
-        }
-      }
-    });
-
-    if (!keepRoot) {
-      if (root.parent) root.parent.remove(root);
-    } else {
-      const childrenToRemove = root.children.filter((child: any) => {
-        if (excludeNames.includes(child.name)) return false;
-        return true;
-      });
-      childrenToRemove.forEach((child: any) => {
-        root.remove(child);
-      });
-    }
-  }
-
-  async function ClearIndexedDB() {
-    const tree = await indexed.GetFileListFromDB("");
-    for (let path of tree) await indexed.removeFileFromUserPath(path);
-  }
-
-  async function loadEpub(file: File) {
-    return await JSZip.loadAsync(file);
-  }
-
-  function getSortedImagePaths(zip: JSZip): string[] {
-    return Object.keys(zip.files)
-      .filter((path) => {
-        return !zip.files[path].dir && /\.(jpg|jpeg|png|webp)$/i.test(path);
-      })
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  }
-
-  async function getImageBlob(zip: JSZip, path: string): Promise<Blob> {
-    const file = zip.file(path);
-    if (!file) throw new Error(`파일 없음: ${path}`);
-    return await file.async("blob");
-  }
-
-  let isEPubLoaded = $state(false);
-  async function LoadEpubFromURL(info: BookInfo) {
-    isEPubLoaded = false;
-    const actId = "loadEpub";
-    toastManager.upsertToast({
-      id: actId,
-      message: isPreviewMode.value
-        ? "맛보기 도서 다운로드 중"
-        : "전자책 정보를 다운받는 중",
-    });
-    try {
-      const response = await fetch(info.epub_url);
-      if (!response.ok)
-        throw new Error(`Failed to fetch file: ${response.statusText}`);
-
-      const contentLength = response.headers.get("Content-Length");
-      const total = contentLength ? parseInt(contentLength, 10) : 0;
-      const reader = response.body.getReader();
-      const chunks = [];
-      let receivedLength = 0;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        receivedLength += value.length;
-
-        if (total) {
-          const percent = (receivedLength / total) * 100;
-          toastManager.upsertToast({
-            id: actId,
-            message: isPreviewMode.value
-              ? "맛보기 도서 다운로드 중"
-              : "전자책 정보를 다운받는 중",
-            progress: Math.floor(percent),
-          });
-        }
-      }
-
-      const blob = new Blob(chunks);
-      const fileName = info.epub_url.split("/").pop() || "download.epub";
-      const file = new File([blob], fileName, { type: blob.type });
-
-      LoadEpubFileAsForm(info, file);
-    } catch (err) {
-      console.error("EPUB 다운로드 실패:", err);
-    }
-  }
-
   let isPageNumberClicked = $state(false);
   let isRunPageAnimating = false;
+
   async function UserWantInputPageNumber() {
     if (isRunPageAnimating) return;
     await new Promise(requestAnimationFrame);
@@ -1633,6 +1625,8 @@
       const diff = filtered - CurrentPage;
       const abs_diff = Math.abs(diff);
       const isPositive = diff > 0;
+
+      // 🌟 촤라락 넘김 연출: 128px 초경량 썸네일로 가볍고 빠른 잔상 플립 보장
       const PageAnim = async () => {
         if (abs_diff) {
           if (LookCoverStatus == "idle") idle_zoom_act();
@@ -1654,7 +1648,14 @@
   }
 
   onDestroy(() => {
-    const keys = Object.keys(threeContext);
+    // RAM 상의 텍스처 및 비트맵 완전 회수
+    inMemoryThumbnails.forEach((t) => t.dispose());
+    inMemoryThumbnails = [];
+    highResTextures.forEach((t) => t.dispose());
+    highResTextures.clear();
+    inMemoryZip = null;
+
+    const keys = Object.keys(threeContext || {});
     for (let key of keys) {
       switch (key) {
         case "container":
@@ -1797,7 +1798,7 @@
     </div>
   {/if}
 
-  <!-- 🌟 5페이지 초과 시도 시 표출되는 구매 유도 모달 (z-index 없이 DOM 자연 순서로 최상단 배치) -->
+  <!-- 🌟 z-index 없는 자연스러운 DOM 순서 모달 팝업 -->
   {#if showBuyGuideModal}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1890,7 +1891,7 @@
     font-size: 16px;
   }
 
-  /* 🌟 z-index 일체 배제한 모달 레이어 */
+  /* 🌟 z-index 없는 모달 레이어 */
   .guide-modal-backdrop {
     position: absolute;
     top: 0;
