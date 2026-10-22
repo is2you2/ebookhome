@@ -214,135 +214,34 @@ const uploadBookFiles = multer({
     { name: 'desc_file', maxCount: 1 }
 ]);
 
-app.post('/api/admin/books', authenticateAdmin, (req, res) => {
-    uploadBookFiles(req, res, async (err) => {
-        if (err) return res.status(400).json({ error: `파일 업로드 실패: ${err.message}` });
+// server/index.js 내 도서 조회 라우트
 
-        const { id, title, author, publisher, price, original_price, desc } = req.body;
-        const bookId = req.uploadedBookId || id;
-
-        if (!bookId || !title || !author) {
-            return res.status(400).json({ error: '도서 식별자, 제목, 저자는 필수 항목입니다.' });
-        }
-
-        const files = req.files || {};
-        const epubFileObj = files['epub_file'] ? files['epub_file'][0] : null;
-
-        if (!epubFileObj && !req.body.epub_url) {
-            return res.status(400).json({ error: '원본 EPUB 파일이 필요합니다.' });
-        }
-
-        const bookDir = path.join(UPLOAD_ROOT, bookId);
-        let thumbnailRel = `assets/books/${bookId}/thumbnail.jpg`;
-        const videoRel = files['video_thumbnail'] ? `assets/books/${bookId}/${files['video_thumbnail'][0].filename}` : null;
-        const descRel = files['desc_file'] ? `assets/books/${bookId}/${files['desc_file'][0].filename}` : null;
-        let epubRel = `assets/books/${bookId}/book.epub`;
-        let previewRel = `assets/books/${bookId}/preview.epub`;
-
-        try {
-            // 🌟 원본 EPUB이 새로 업로드된 경우 자동 가공 파이프라인 수행
-            if (epubFileObj) {
-                const epubBuffer = fs.readFileSync(epubFileObj.path);
-                const zip = await JSZip.loadAsync(epubBuffer);
-
-                // 이미지 파일 추출 및 정렬
-                const imagePaths = Object.keys(zip.files)
-                    .filter((p) => !zip.files[p].dir && /\.(jpg|jpeg|png|webp)$/i.test(p))
-                    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-
-                if (imagePaths.length === 0) {
-                    throw new Error('EPUB 내부에 이미지 파일이 존재하지 않습니다.');
-                }
-
-                // 1. [표지 자동 생성] 첫 번째 페이지 이미지를 추출하여 thumbnail.jpg로 저장
-                const firstImageBuffer = await zip.file(imagePaths[0]).async('nodebuffer');
-                fs.writeFileSync(path.join(bookDir, 'thumbnail.jpg'), firstImageBuffer);
-
-                // 2. [5페이지 맛보기 자동 생성] 5페이지(인덱스 5) 이후 이미지를 1x1 백색 더미로 치환
-                const previewZip = await JSZip.loadAsync(epubBuffer);
-                for (let i = 5; i < imagePaths.length; i++) {
-                    previewZip.file(imagePaths[i], BLANK_DUMMY_IMAGE);
-                }
-
-                const previewBuffer = await previewZip.generateAsync({
-                    type: 'nodebuffer',
-                    compression: 'DEFLATE',
-                    compressionOptions: { level: 6 }
-                });
-                fs.writeFileSync(path.join(bookDir, 'preview.epub'), previewBuffer);
-            }
-
-            // DB 등록 및 갱신
-            db.prepare(`
-                INSERT INTO books (id, title, author, publisher, price, original_price, desc, description_url, thumbnail, video_thumbnail, epub_url, preview_epub_url)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    title=excluded.title, author=excluded.author, publisher=excluded.publisher,
-                    price=excluded.price, original_price=excluded.original_price, desc=excluded.desc,
-                    description_url=COALESCE(excluded.description_url, books.description_url),
-                    thumbnail=excluded.thumbnail,
-                    video_thumbnail=COALESCE(excluded.video_thumbnail, books.video_thumbnail),
-                    epub_url=excluded.epub_url,
-                    preview_epub_url=excluded.preview_epub_url
-            `).run(
-                bookId, title, author, publisher || '', Number(price) || 0,
-                original_price ? Number(original_price) : null, desc || '', descRel,
-                thumbnailRel, videoRel, epubRel, previewRel
-            );
-
-            res.json({
-                success: true,
-                message: '도서 등록, 첫 장 표지 추출 및 5페이지 맛보기 파일 생성이 완료되었습니다.',
-                bookId
-            });
-        } catch (processErr) {
-            console.error('EPUB 처리 중 에러:', processErr);
-            res.status(500).json({ error: `EPUB 가공 처리 실패: ${processErr.message}` });
-        }
-    });
+// 🌟 1. 관리자 전용 전체 도서 목록 (비공개/숨김 도서 포함)
+app.get('/api/admin/books', authenticateAdmin, (req, res) => {
+    try {
+        const books = db.prepare('SELECT * FROM books ORDER BY created_at DESC').all();
+        res.json(books);
+    } catch (err) {
+        console.error('관리자 도서 목록 조회 에러:', err);
+        res.status(500).json({ error: '도서 목록 조회 중 데이터베이스 오류가 발생했습니다.' });
+    }
 });
 
-app.post('/api/admin/books', authenticateAdmin, (req, res) => {
-    uploadBookFiles(req, res, async (err) => {
-        if (err) return res.status(400).json({ error: `파일 업로드 실패: ${err.message}` });
-
-        const { id, title, author, publisher, price, original_price, desc } = req.body;
-        const bookId = req.uploadedBookId || id;
-
-        if (!bookId || !title || !author) {
-            return res.status(400).json({ error: '도서 식별자, 제목, 저자는 필수 항목입니다.' });
-        }
-
-        const files = req.files || {};
-        const thumbnailRel = files['thumbnail'] ? `assets/books/${bookId}/${files['thumbnail'][0].filename}` : req.body.thumbnail || '';
-        const videoRel = files['video_thumbnail'] ? `assets/books/${bookId}/${files['video_thumbnail'][0].filename}` : null;
-        const descRel = files['desc_file'] ? `assets/books/${bookId}/${files['desc_file'][0].filename}` : null;
-        const epubRel = files['epub_file'] ? `assets/books/${bookId}/${files['epub_file'][0].filename}` : req.body.epub_url || '';
-        const previewRel = files['preview_epub_file'] ? `assets/books/${bookId}/${files['preview_epub_file'][0].filename}` : null;
-
-        try {
-            db.prepare(`
-                INSERT INTO books (id, title, author, publisher, price, original_price, desc, description_url, thumbnail, video_thumbnail, epub_url, preview_epub_url)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    title=excluded.title, author=excluded.author, publisher=excluded.publisher,
-                    price=excluded.price, original_price=excluded.original_price, desc=excluded.desc,
-                    description_url=COALESCE(excluded.description_url, books.description_url),
-                    thumbnail=COALESCE(excluded.thumbnail, books.thumbnail),
-                    video_thumbnail=COALESCE(excluded.video_thumbnail, books.video_thumbnail),
-                    epub_url=COALESCE(excluded.epub_url, books.epub_url),
-                    preview_epub_url=COALESCE(excluded.preview_epub_url, books.preview_epub_url)
-            `).run(
-                bookId, title, author, publisher || '', Number(price) || 0,
-                original_price ? Number(original_price) : null, desc || '', descRel,
-                thumbnailRel, videoRel, epubRel, previewRel
-            );
-
-            res.json({ success: true, message: '도서가 등록/갱신되었습니다.', bookId });
-        } catch (dbErr) {
-            res.status(500).json({ error: `도서 저장 오류: ${dbErr.message}` });
-        }
-    });
+// 🌟 2. 스토어 공개용 도서 목록 (판매 중인 도서만 반환)
+app.get('/api/books', (req, res) => {
+    try {
+        const books = db.prepare(`
+            SELECT id, title, author, publisher, price, original_price, desc,
+                   description_url, thumbnail, video_thumbnail, epub_url, preview_epub_url
+            FROM books
+            WHERE is_active = 1
+            ORDER BY created_at DESC
+        `).all();
+        res.json(books);
+    } catch (err) {
+        console.error('스토어 도서 목록 조회 에러:', err);
+        res.status(500).json({ error: '스토어 도서 목록 조회 실패' });
+    }
 });
 
 app.patch('/api/admin/books/:id/toggle', authenticateAdmin, (req, res) => {

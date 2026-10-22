@@ -14,6 +14,7 @@
     }
 
     let books = $state<BookRecord[]>([]);
+    let isLoading = $state(false);
     let isSubmitting = $state(false);
 
     let id = $state("");
@@ -24,19 +25,36 @@
     let originalPrice = $state<number>(13000);
     let desc = $state("");
 
-    // 🌟 표지 및 맛보기 필드 제거, 3종류만 유지
     let videoFile: File | null = null;
     let descFile: File | null = null;
     let epubFile: File | null = null;
 
+    // 🌟 안전한 도서 목록 수신 함수
     async function loadBooks() {
+        if (!adminToken) return;
+        isLoading = true;
         try {
             const res = await fetch("http://localhost:3000/api/admin/books", {
                 headers: { Authorization: `Bearer ${adminToken}` },
             });
-            books = await res.json();
+            const data = await res.json();
+
+            if (!res.ok) {
+                console.error(
+                    "도서 목록 로드 실패 (HTTP " + res.status + "):",
+                    data,
+                );
+                books = [];
+                return;
+            }
+
+            // 배열 형태 응답만 안전하게 바인딩
+            books = Array.isArray(data) ? data : [];
         } catch (e) {
-            console.error(e);
+            console.error("도서 목록 통신 에러:", e);
+            books = [];
+        } finally {
+            isLoading = false;
         }
     }
 
@@ -84,7 +102,9 @@
             videoFile = null;
             descFile = null;
             epubFile = null;
-            loadBooks();
+
+            // 🌟 등록 즉시 목록 비동기 동기화
+            await loadBooks();
         } catch (err: any) {
             alert(`등록 실패: ${err.message}`);
         } finally {
@@ -97,7 +117,7 @@
             method: "PATCH",
             headers: { Authorization: `Bearer ${adminToken}` },
         });
-        loadBooks();
+        await loadBooks();
     }
 
     async function deleteBook(bookId: string) {
@@ -107,7 +127,7 @@
             method: "DELETE",
             headers: { Authorization: `Bearer ${adminToken}` },
         });
-        loadBooks();
+        await loadBooks();
     }
 </script>
 
@@ -227,46 +247,53 @@
                 </thead>
                 <tbody>
                     {#if books.length === 0}
-                        <tr
-                            ><td colspan="7" class="empty"
-                                >등록된 도서가 없습니다.</td
-                            ></tr
-                        >
-                    {/if}
-                    {#each books as b}
                         <tr>
-                            <td><code>{b.id}</code></td>
-                            <td><strong>{b.title}</strong></td>
-                            <td>{b.author}</td>
-                            <td>{b.price.toLocaleString()}원</td>
-                            <td>
-                                {#if b.preview_epub_url}
-                                    <span class="badge green"
-                                        >자동 생성 완료</span
-                                    >
-                                {:else}
-                                    <span class="badge gray">생성 대기</span>
-                                {/if}
-                            </td>
-                            <td>
-                                <button
-                                    class="status-badge {b.is_active
-                                        ? 'active'
-                                        : 'hidden'}"
-                                    onclick={() => toggleActive(b.id)}
-                                >
-                                    {b.is_active ? "판매 중" : "숨김"}
-                                </button>
-                            </td>
-                            <td>
-                                <button
-                                    class="btn-del"
-                                    onclick={() => deleteBook(b.id)}
-                                    >삭제</button
-                                >
+                            <td colspan="7" class="empty">
+                                {isLoading
+                                    ? "도서 목록을 불러오는 중입니다..."
+                                    : "등록된 도서가 없습니다."}
                             </td>
                         </tr>
-                    {/each}
+                    {:else}
+                        {#each books as b}
+                            <tr>
+                                <td><code>{b.id}</code></td>
+                                <td><strong>{b.title}</strong></td>
+                                <td>{b.author}</td>
+                                <td
+                                    >{b.price
+                                        ? b.price.toLocaleString()
+                                        : "0"}원</td
+                                >
+                                <td>
+                                    {#if b.preview_epub_url}
+                                        <span class="badge green"
+                                            >자동 생성 완료</span
+                                        >
+                                    {:else}
+                                        <span class="badge gray">미등록</span>
+                                    {/if}
+                                </td>
+                                <td>
+                                    <button
+                                        class="status-badge {b.is_active
+                                            ? 'active'
+                                            : 'hidden'}"
+                                        onclick={() => toggleActive(b.id)}
+                                    >
+                                        {b.is_active ? "판매 중" : "숨김"}
+                                    </button>
+                                </td>
+                                <td>
+                                    <button
+                                        class="btn-del"
+                                        onclick={() => deleteBook(b.id)}
+                                        >삭제</button
+                                    >
+                                </td>
+                            </tr>
+                        {/each}
+                    {/if}
                 </tbody>
             </table>
         </div>

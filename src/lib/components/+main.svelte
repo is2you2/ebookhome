@@ -24,41 +24,26 @@
     // 🌟 클라이언트 내부 데이터로만 테스트 (소장 도서)
     let BookList = $state<BookInfo[]>([]);
 
-    // 🌟 클라이언트 내부 데이터로만 테스트 (스토어 도서 목록)
-    let StoreList = $state<BookInfo[]>([
-        {
-            id: "test_book_id_0",
-            title: "바이블일러스트큐티",
-            desc: "말풍선 글짓기 QT",
-            description_url: "assets/books/00/desc.txt",
-            thumbnail: "assets/books/00/thumbnail.jpg",
-            video_thumbnail: "assets/books/00/cover.mp4",
-            epub_url: "assets/books/00/book.epub",
-            purchase_time: 0,
-            author: "최정훈",
-            publisher: "윗샘과아랫샘",
-            price: 10000,
-            original_price: 13000,
-            rating: 4.9,
-            rating_count: 42,
-        },
-        {
-            id: "test_book_id_1",
-            title: "새로운 비디오 책 샘플",
-            desc: "영상 표지가 포함된 샘플 전자책",
-            description_url: "assets/books/01/desc.txt",
-            thumbnail: "assets/thumbnail2.jpg",
-            video_thumbnail: "assets/vid_cover_sample2.mp4",
-            epub_url: "assets/books/01/book.epub",
-            purchase_time: 0,
-            author: "작자미상",
-            publisher: "디지털북스",
-            price: 15000,
-            original_price: 15000,
-            rating: 4.5,
-            rating_count: 12,
-        },
-    ]);
+    let StoreList = $state<BookInfo[]>([]);
+
+    // 🌟 서버 DB에 등록된 도서 목록을 불러오는 함수
+    async function loadStoreBooks() {
+        try {
+            const res = await fetch("http://localhost:3000/api/books");
+            if (res.ok) {
+                const data = await res.json();
+                if (Array.isArray(data)) {
+                    StoreList = data;
+                }
+            }
+        } catch (err) {
+            console.warn("스토어 도서 목록 조회 실패:", err);
+        }
+    }
+
+    $effect(() => {
+        loadStoreBooks();
+    });
 
     let filteredStoreList = $derived(
         StoreList.filter(
