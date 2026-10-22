@@ -34,6 +34,16 @@ db.exec(`
 
 app.use('/assets', express.static(path.join(process.cwd(), 'public', 'assets')));
 
+app.use(
+    '/assets',
+    express.static(path.join(process.cwd(), 'public', 'assets'), {
+        setHeaders: (res) => {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+        }
+    })
+);
+
 // -------------------------------------------------------------
 // 데이터베이스 스키마 정의
 // -------------------------------------------------------------

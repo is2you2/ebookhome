@@ -390,10 +390,15 @@
     try {
       RemoveVideoElement();
       let VideoTexTag = document.createElement("video");
+
+      // 🌟 필수 추가: WebGL 텍스처 변환을 위한 CORS 허용 요청 플래그
+      VideoTexTag.crossOrigin = "anonymous";
+
       VideoTexTag.src = getAssetUrl(path);
       VideoTexTag.loop = true;
       VideoTexTag.muted = true;
       VideoTexTag.playsInline = true;
+
       await VideoTexTag.play();
 
       VideoTexture = new THREE.VideoTexture(VideoTexTag);
